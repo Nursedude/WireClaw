@@ -136,6 +136,7 @@ Works with [Ollama](https://ollama.com/), [llama.cpp](https://github.com/ggergan
 | `telegram_cooldown` | Minimum seconds between Telegram messages per rule (default: 60, 0 = disabled) |
 | `timezone` | POSIX TZ string for NTP time sync (default: `UTC0`) |
 | `lora_tx_psk` | LoRa TX channel PSK (16/32-byte hex or base64) for `mesh_send`; empty = public default channel |
+| `lora_tx_channel` | LoRa TX channel name (drives the channel hash); empty = `LongFast` |
 
 Edit `data/system_prompt.txt` to customize the AI's personality and instructions.
 

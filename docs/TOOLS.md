@@ -4,7 +4,7 @@
 
 ## LLM Tools
 
-24 tools available to the AI:
+25 tools available to the AI:
 
 | Tool | Description |
 |------|-------------|
@@ -17,6 +17,7 @@
 | `battery_read` | Read battery voltage via the VBAT divider (boards with battery sense) |
 | `lora_stats` | RX-only LoRa listener stats — last-heard age, packet/CRC counters (boards with an SX1262) |
 | `mesh_send` | Broadcast a text message onto the Meshtastic LoRa channel (boards with SX1262 TX) |
+| `mesh_set_channel` | Set the LoRa TX channel name + PSK at runtime (RAM; key never in flash) |
 | **Device Registry** | |
 | `device_register` | Register a named sensor or actuator |
 | `device_list` | List all devices with current readings |

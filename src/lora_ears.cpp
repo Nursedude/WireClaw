@@ -120,6 +120,7 @@ static const uint8_t DEFAULT_PUBLIC_PSK[16] = {
 static uint8_t s_psk[32];
 static size_t s_psk_len = 16;
 static uint8_t s_channel_hash = 0;
+static char s_channel_name[32] = WIRECLAW_LORA_TX_CHANNEL;
 static uint32_t s_node_id = 0;
 static unsigned long s_last_tx_ms = 0;
 static unsigned long s_tx_count = 0;
@@ -132,8 +133,8 @@ static uint8_t xorHash(const uint8_t *p, size_t len) {
 
 /* hash = xorHash(channel name) ^ xorHash(psk) — Meshtastic Channels::hash */
 static void recomputeChannelHash() {
-    const char *name = WIRECLAW_LORA_TX_CHANNEL;
-    s_channel_hash = xorHash((const uint8_t *)name, strlen(name)) ^
+    s_channel_hash = xorHash((const uint8_t *)s_channel_name,
+                             strlen(s_channel_name)) ^
                      xorHash(s_psk, s_psk_len);
 }
 
@@ -183,6 +184,17 @@ static size_t decodeB64Key(const char *str, uint8_t *out, size_t out_max) {
         }
     }
     return out_n;
+}
+
+uint8_t loraMeshChannelHash() { return s_channel_hash; }
+
+bool loraMeshSetChannel(const char *name, const char *key_str) {
+    if (!name || !name[0]) return false;
+    /* Set name first; loraMeshSetPsk recomputes the hash against it. The
+     * channel name is not secret; the key still never lands in flash. */
+    strncpy(s_channel_name, name, sizeof(s_channel_name) - 1);
+    s_channel_name[sizeof(s_channel_name) - 1] = '\0';
+    return loraMeshSetPsk(key_str);
 }
 
 bool loraMeshSetPsk(const char *key_str) {
@@ -296,7 +308,7 @@ void loraMeshSend(const char *text, char *out, int out_len) {
     snprintf(out, out_len,
              "Sent: ch '%s' (hash 0x%02x) from=!%08x id=0x%08x "
              "%u bytes @ %d dBm (tx #%lu)",
-             WIRECLAW_LORA_TX_CHANNEL, (unsigned)s_channel_hash,
+             s_channel_name, (unsigned)s_channel_hash,
              (unsigned)s_node_id, (unsigned)pkt_id, (unsigned)pkt_len,
              (int)WIRECLAW_LORA_TX_DBM, s_tx_count);
 }
@@ -345,7 +357,7 @@ void loraEarsInit() {
     loraMeshSetPsk(nullptr);
     Serial.printf("LoRa TX ready: node !%08x, ch '%s' hash 0x%02x, "
                   "%d dBm, min %lus between sends\n",
-                  (unsigned)s_node_id, WIRECLAW_LORA_TX_CHANNEL,
+                  (unsigned)s_node_id, s_channel_name,
                   (unsigned)s_channel_hash, (int)WIRECLAW_LORA_TX_DBM,
                   WIRECLAW_LORA_MIN_TX_INTERVAL_MS / 1000UL);
 #endif

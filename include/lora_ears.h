@@ -54,6 +54,14 @@ static inline void loraEarsStats(char *, int) {}
  *  false on a malformed key (length not 16/32 after decode). */
 bool loraMeshSetPsk(const char *key_str);
 
+/** Set BOTH the channel name and PSK at runtime (the name drives the hash,
+ *  so a private channel needs both). Name is not secret; the key still never
+ *  lands in flash. Returns false on empty name or a malformed key. */
+bool loraMeshSetChannel(const char *name, const char *key_str);
+
+/** Current channel hash byte (the cleartext header field — not secret). */
+uint8_t loraMeshChannelHash();
+
 /** Broadcast a Meshtastic TEXT_MESSAGE_APP packet on the configured channel.
  *  Half-duplex: pauses RX, transmits, resumes RX. Enforces a minimum
  *  inter-TX interval (airtime restraint) and refuses oversize text. Writes
@@ -63,6 +71,10 @@ void loraMeshSend(const char *text, char *out, int out_len);
 #else
 
 static inline bool loraMeshSetPsk(const char *) { return false; }
+static inline bool loraMeshSetChannel(const char *, const char *) {
+    return false;
+}
+static inline uint8_t loraMeshChannelHash() { return 0; }
 static inline void loraMeshSend(const char *, char *out, int out_len) {
     snprintf(out, out_len, "Error: LoRa TX not built on this device");
 }

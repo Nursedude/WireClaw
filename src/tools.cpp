@@ -115,6 +115,7 @@ static const char *TOOLS_JSON = R"JSON([
 {"type":"function","function":{"name":"battery_read","description":"Read battery voltage in volts (boards with a VBAT divider)","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"lora_stats","description":"RX-only LoRa listener stats: seconds since last mesh packet heard, packet/CRC counters, last header fields (boards with an SX1262)","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"mesh_send","description":"Broadcast a text message onto the Meshtastic LoRa channel (boards with an SX1262 and TX built). Airtime-limited.","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Message text (<=200 chars)"}},"required":["text"]}}},
+{"type":"function","function":{"name":"mesh_set_channel","description":"Set the LoRa TX channel name and PSK at runtime (RAM only; the key never lands in flash). Returns the resulting channel hash.","parameters":{"type":"object","properties":{"name":{"type":"string","description":"Channel name"},"psk":{"type":"string","description":"16/32-byte key, hex or base64; empty = public default"}},"required":["name"]}}},
 {"type":"function","function":{"name":"chain_create","description":"Create multi-step automation chain (up to 5 steps) in one call. Steps execute in order with delays.","parameters":{"type":"object","properties":{"sensor_name":{"type":"string","description":"Sensor to monitor"},"condition":{"type":"string","description":"gt|lt|eq|neq|change|always"},"threshold":{"type":"integer"},"interval_seconds":{"type":"integer"},"step1_action":{"type":"string","description":"telegram|led_set|gpio_write|nats_publish|actuator|serial_send"},"step1_message":{"type":"string","description":"For telegram/nats/serial_send"},"step1_r":{"type":"integer"},"step1_g":{"type":"integer"},"step1_b":{"type":"integer"},"step1_pin":{"type":"integer"},"step1_value":{"type":"integer"},"step1_actuator":{"type":"string"},"step1_nats_subject":{"type":"string"},"step2_action":{"type":"string","description":"Action after step1"},"step2_delay":{"type":"integer","description":"Seconds before step2"},"step2_message":{"type":"string"},"step2_r":{"type":"integer"},"step2_g":{"type":"integer"},"step2_b":{"type":"integer"},"step2_pin":{"type":"integer"},"step2_value":{"type":"integer"},"step2_actuator":{"type":"string"},"step2_nats_subject":{"type":"string"},"step3_action":{"type":"string","description":"Step3 (optional)"},"step3_delay":{"type":"integer","description":"Seconds before step3"},"step3_message":{"type":"string"},"step3_r":{"type":"integer"},"step3_g":{"type":"integer"},"step3_b":{"type":"integer"},"step3_pin":{"type":"integer"},"step3_value":{"type":"integer"},"step3_actuator":{"type":"string"},"step3_nats_subject":{"type":"string"},"step4_action":{"type":"string","description":"Step4 (optional)"},"step4_delay":{"type":"integer","description":"Seconds before step4"},"step4_message":{"type":"string"},"step4_r":{"type":"integer"},"step4_g":{"type":"integer"},"step4_b":{"type":"integer"},"step4_pin":{"type":"integer"},"step4_value":{"type":"integer"},"step4_actuator":{"type":"string"},"step4_nats_subject":{"type":"string"},"step5_action":{"type":"string","description":"Step5 (optional)"},"step5_delay":{"type":"integer","description":"Seconds before step5"},"step5_message":{"type":"string"},"step5_r":{"type":"integer"},"step5_g":{"type":"integer"},"step5_b":{"type":"integer"},"step5_pin":{"type":"integer"},"step5_value":{"type":"integer"},"step5_actuator":{"type":"string"},"step5_nats_subject":{"type":"string"}},"required":["sensor_name","condition","threshold","step1_action","step2_action"]}}}
 ])JSON";
 
@@ -1007,6 +1008,28 @@ static void tool_mesh_send(const char *args, char *result, int result_len) {
     loraMeshSend(text, result, result_len); /* honest error if TX not built */
 }
 
+static void tool_mesh_set_channel(const char *args, char *result,
+                                  int result_len) {
+    char name[40], psk[96];
+    name[0] = '\0';
+    psk[0] = '\0';
+    jsonArgString(args, "name", name, sizeof(name));
+    jsonArgString(args, "psk", psk, sizeof(psk)); /* absent/empty = public */
+    if (!name[0]) {
+        snprintf(result, result_len, "Error: name required");
+        return;
+    }
+    if (loraMeshSetChannel(name, psk))
+        /* Echo name + hash only (the hash is the cleartext header byte —
+         * lets a receiver-side check confirm the channel — never the key). */
+        snprintf(result, result_len, "Channel set: '%s' (hash 0x%02x)",
+                 name, (unsigned)loraMeshChannelHash());
+    else
+        snprintf(result, result_len,
+                 "Error: bad channel/key (need 16/32-byte hex or base64), "
+                 "or TX not built");
+}
+
 /*============================================================================
  * Chain Create — multi-step chain in one call
  *============================================================================*/
@@ -1266,6 +1289,8 @@ bool toolExecute(const char *name, const char *args_json,
         tool_lora_stats(args_json, result, result_len);
     } else if (strcmp(name, "mesh_send") == 0) {
         tool_mesh_send(args_json, result, result_len);
+    } else if (strcmp(name, "mesh_set_channel") == 0) {
+        tool_mesh_set_channel(args_json, result, result_len);
     } else if (strcmp(name, "chain_create") == 0) {
         tool_chain_create(args_json, result, result_len);
     } else {
