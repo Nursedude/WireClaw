@@ -1019,15 +1019,21 @@ static void tool_mesh_set_channel(const char *args, char *result,
         snprintf(result, result_len, "Error: name required");
         return;
     }
-    if (loraMeshSetChannel(name, psk))
-        /* Echo name + hash only (the hash is the cleartext header byte —
-         * lets a receiver-side check confirm the channel — never the key). */
-        snprintf(result, result_len, "Channel set: '%s' (hash 0x%02x)",
-                 name, (unsigned)loraMeshChannelHash());
-    else
+    if (!loraMeshSetChannel(name, psk)) {
         snprintf(result, result_len,
                  "Error: bad channel/key (need 16/32-byte hex or base64), "
                  "or TX not built");
+        return;
+    }
+    /* Optional durability: persist to the device's own flash so a reboot
+     * keeps the channel (operator-opt-in; default RAM-only). */
+    bool persist = jsonArgInt(args, "persist", 0) != 0;
+    bool persisted = persist && loraPersistChannel(name, psk);
+    /* Echo name + hash only (the hash is the cleartext header byte — lets a
+     * receiver-side check confirm the channel — never the key). */
+    snprintf(result, result_len, "Channel set: '%s' (hash 0x%02x)%s",
+             name, (unsigned)loraMeshChannelHash(),
+             persist ? (persisted ? " [persisted]" : " [persist FAILED]") : "");
 }
 
 /*============================================================================

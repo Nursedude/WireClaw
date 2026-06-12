@@ -1660,6 +1660,9 @@ void setup() {
             Serial.printf("LoRa TX: config lora_tx_psk INVALID (need 16/32 "
                           "bytes hex or base64) — keeping public default\n");
     }
+    /* A NATS-persisted channel (its own flash file) takes precedence — it is
+     * the most recent operator intent. No-op if none was persisted. */
+    loraLoadPersistedChannel();
 
     /* Initialize temperature sensor (not available on classic ESP32) */
 #if !defined(CONFIG_IDF_TARGET_ESP32)

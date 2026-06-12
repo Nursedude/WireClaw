@@ -80,6 +80,9 @@ static void IRAM_ATTR onLoraDio1() { s_rx_flag = true; }
 #include <mbedtls/aes.h>
 #include <esp_system.h>
 #include <esp_mac.h>
+#include <LittleFS.h>
+
+#define LORA_CHANNEL_FILE "/lora_channel.json"
 
 /* GC1109 front-end (Heltec V4.2): CSD enable, VFEM power, PA/TX-enable.
  * RX worked in Phase 1 without driving these (FEM passes RX through), but
@@ -191,10 +194,74 @@ uint8_t loraMeshChannelHash() { return s_channel_hash; }
 bool loraMeshSetChannel(const char *name, const char *key_str) {
     if (!name || !name[0]) return false;
     /* Set name first; loraMeshSetPsk recomputes the hash against it. The
-     * channel name is not secret; the key still never lands in flash. */
+     * channel name is not secret. */
     strncpy(s_channel_name, name, sizeof(s_channel_name) - 1);
     s_channel_name[sizeof(s_channel_name) - 1] = '\0';
     return loraMeshSetPsk(key_str);
+}
+
+/* Minimal JSON string-value extractor for the tiny persisted file. */
+static bool loraJsonGet(const char *json, const char *key, char *dst,
+                        int dst_len) {
+    char pat[24];
+    snprintf(pat, sizeof(pat), "\"%s\"", key);
+    const char *p = strstr(json, pat);
+    if (!p) return false;
+    p += strlen(pat);
+    while (*p == ' ' || *p == ':') p++;
+    if (*p != '"') return false;
+    p++;
+    int w = 0;
+    while (*p && *p != '"' && w < dst_len - 1) {
+        if (*p == '\\' && *(p + 1)) p++;
+        dst[w++] = *p++;
+    }
+    dst[w] = '\0';
+    return true;
+}
+
+bool loraPersistChannel(const char *name, const char *key_str) {
+    /* Operator opted into durability: the channel (name + key) is written to
+     * the device's own flash — the same trust model as Meshtastic's channel
+     * store. Kept in a DEDICATED file, not config.json, so it never clobbers
+     * keys this build doesn't know (e.g. another fork branch's). */
+    if (!name || !name[0]) return false;
+    File f = LittleFS.open(LORA_CHANNEL_FILE, "w");
+    if (!f) return false;
+    f.print("{\"name\":\"");
+    for (const char *c = name; *c; c++)
+        if (*c != '"' && *c != '\\') f.print(*c);
+    f.print("\",\"psk\":\"");
+    if (key_str)
+        for (const char *c = key_str; *c; c++)
+            if (*c != '"' && *c != '\\') f.print(*c);
+    f.print("\"}\n");
+    f.close();
+    return true;
+}
+
+void loraClearPersistedChannel() {
+    if (LittleFS.exists(LORA_CHANNEL_FILE)) LittleFS.remove(LORA_CHANNEL_FILE);
+}
+
+void loraLoadPersistedChannel() {
+    if (!LittleFS.exists(LORA_CHANNEL_FILE)) return;
+    File f = LittleFS.open(LORA_CHANNEL_FILE, "r");
+    if (!f) return;
+    char buf[160];
+    int n = f.readBytes(buf, sizeof(buf) - 1);
+    f.close();
+    if (n <= 0) return;
+    buf[n] = '\0';
+    char name[40] = {0}, psk[96] = {0};
+    if (loraJsonGet(buf, "name", name, sizeof(name)) && name[0]) {
+        loraJsonGet(buf, "psk", psk, sizeof(psk));
+        if (loraMeshSetChannel(name, psk))
+            Serial.printf("LoRa TX: persisted channel '%s' restored\n", name);
+        else
+            Serial.printf("LoRa TX: persisted channel INVALID — public "
+                          "default stands\n");
+    }
 }
 
 bool loraMeshSetPsk(const char *key_str) {

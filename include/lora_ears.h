@@ -62,6 +62,16 @@ bool loraMeshSetChannel(const char *name, const char *key_str);
 /** Current channel hash byte (the cleartext header field — not secret). */
 uint8_t loraMeshChannelHash();
 
+/** Persist the channel (name + key) to the device's own flash so it survives
+ *  reboots (operator-opt-in durability; dedicated file, not config.json). */
+bool loraPersistChannel(const char *name, const char *key_str);
+
+/** Restore a persisted channel at boot (no-op if none). */
+void loraLoadPersistedChannel();
+
+/** Forget any persisted channel (revert to the public default on next boot). */
+void loraClearPersistedChannel();
+
 /** Broadcast a Meshtastic TEXT_MESSAGE_APP packet on the configured channel.
  *  Half-duplex: pauses RX, transmits, resumes RX. Enforces a minimum
  *  inter-TX interval (airtime restraint) and refuses oversize text. Writes
@@ -75,6 +85,11 @@ static inline bool loraMeshSetChannel(const char *, const char *) {
     return false;
 }
 static inline uint8_t loraMeshChannelHash() { return 0; }
+static inline bool loraPersistChannel(const char *, const char *) {
+    return false;
+}
+static inline void loraLoadPersistedChannel() {}
+static inline void loraClearPersistedChannel() {}
 static inline void loraMeshSend(const char *, char *out, int out_len) {
     snprintf(out, out_len, "Error: LoRa TX not built on this device");
 }
