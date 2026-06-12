@@ -22,6 +22,19 @@ Rule triggers automatically publish events:
 {"event":"rule","rule":"cool down","state":"on","reading":29,"threshold":28}
 ```
 
+### Authentication
+
+Set `nats_token` in the config (portal, web UI, or `config.json`) to
+authenticate against a token-protected server — it is sent as `auth_token`
+in the CONNECT handshake. Empty means no auth. Server side:
+
+```
+# nats-server.conf
+authorization { token: "s3cret" }
+```
+
+Without a token the device works against open servers exactly as before.
+
 ### NATS Virtual Sensors
 
 Any NATS subject can become a sensor in WireClaw's device registry. Register it via conversation, and the ESP32 subscribes and stores the last received value. Rules, `sensor_read`, and message interpolation all work on it like any other sensor. No pin needed.

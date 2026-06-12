@@ -24,6 +24,7 @@ extern char cfg_device_name[32];
 extern char cfg_api_base_url[128];
 extern char cfg_nats_host[64];
 extern int  cfg_nats_port;
+extern char cfg_nats_token[96];
 extern char cfg_telegram_token[64];
 extern char cfg_telegram_chat_id[16];
 extern char cfg_system_prompt[4096];
@@ -117,10 +118,11 @@ static void maskSensitive(const char *src, char *dst, int dst_len) {
 
 static void handleGetConfig() {
     static char buf[1024];
-    char masked_key[16], masked_pass[16], masked_tg[16];
+    char masked_key[16], masked_pass[16], masked_tg[16], masked_nats[16];
     maskSensitive(cfg_api_key, masked_key, sizeof(masked_key));
     maskSensitive(cfg_wifi_pass, masked_pass, sizeof(masked_pass));
     maskSensitive(cfg_telegram_token, masked_tg, sizeof(masked_tg));
+    maskSensitive(cfg_nats_token, masked_nats, sizeof(masked_nats));
     char masked_lpsk[16];
     maskSensitive(cfg_lora_tx_psk, masked_lpsk, sizeof(masked_lpsk));
 
@@ -134,6 +136,7 @@ static void handleGetConfig() {
         "\"api_base_url\":\"%s\","
         "\"nats_host\":\"%s\","
         "\"nats_port\":\"%d\","
+        "\"nats_token\":\"%s\","
         "\"telegram_token\":\"%s\","
         "\"telegram_chat_id\":\"%s\","
         "\"telegram_cooldown\":\"%d\","
@@ -142,8 +145,8 @@ static void handleGetConfig() {
         "}",
         cfg_wifi_ssid, masked_pass, masked_key, cfg_model,
         cfg_device_name, cfg_api_base_url, cfg_nats_host, cfg_nats_port,
-        masked_tg, cfg_telegram_chat_id, cfg_telegram_cooldown, cfg_timezone,
-        masked_lpsk);
+        masked_nats, masked_tg, cfg_telegram_chat_id, cfg_telegram_cooldown,
+        cfg_timezone, masked_lpsk);
 
     server.send(200, "application/json", buf);
 }
@@ -174,14 +177,15 @@ static void handlePostConfig() {
         const char *key;
         char val[128];
     };
-    static Field fields[13];
+    static Field fields[14];
     const char *keys[] = {
         "wifi_ssid", "wifi_pass", "api_key", "model", "device_name",
-        "api_base_url", "nats_host", "nats_port", "telegram_token",
-        "telegram_chat_id", "telegram_cooldown", "timezone", "lora_tx_psk"
+        "api_base_url", "nats_host", "nats_port", "nats_token",
+        "telegram_token", "telegram_chat_id", "telegram_cooldown", "timezone",
+        "lora_tx_psk"
     };
 
-    for (int i = 0; i < 13; i++) {
+    for (int i = 0; i < 14; i++) {
         fields[i].key = keys[i];
         fields[i].val[0] = '\0';
 
@@ -203,10 +207,10 @@ static void handlePostConfig() {
     }
 
     f.print("{\n");
-    for (int i = 0; i < 13; i++) {
+    for (int i = 0; i < 14; i++) {
         f.print("  \""); f.print(fields[i].key); f.print("\": ");
         wcWriteJsonEscaped(f, fields[i].val);
-        if (i < 12) f.print(",");
+        if (i < 13) f.print(",");
         f.print("\n");
     }
     f.print("}\n");
@@ -676,6 +680,9 @@ nav button{padding:0.4rem 0.6rem;font-size:0.8rem}
 <input type="text" id="c_nats_host">
 <label>NATS Port</label>
 <input type="number" id="c_nats_port">
+<label>NATS Token</label>
+<input type="password" id="c_nats_token">
+<p class="hint">Leave empty if the server has no auth.</p>
 <div class="sep"></div>
 <label>Telegram Bot Token</label>
 <input type="password" id="c_telegram_token">
@@ -771,13 +778,13 @@ setTimeout(function(){t.className='toast'},2500);
 function loadConfig(){
 fetch('/api/config').then(r=>r.json()).then(d=>{
 var f=['wifi_ssid','wifi_pass','api_key','model','device_name','api_base_url',
-'nats_host','nats_port','telegram_token','telegram_chat_id','telegram_cooldown','timezone','lora_tx_psk'];
+'nats_host','nats_port','nats_token','telegram_token','telegram_chat_id','telegram_cooldown','timezone','lora_tx_psk'];
 f.forEach(k=>{var el=document.getElementById('c_'+k);if(el)el.value=d[k]||''});
 }).catch(e=>toast('Failed to load config',false));
 }
 function saveConfig(){
 var f=['wifi_ssid','wifi_pass','api_key','model','device_name','api_base_url',
-'nats_host','nats_port','telegram_token','telegram_chat_id','telegram_cooldown','timezone','lora_tx_psk'];
+'nats_host','nats_port','nats_token','telegram_token','telegram_chat_id','telegram_cooldown','timezone','lora_tx_psk'];
 var d={};f.forEach(k=>{d[k]=document.getElementById('c_'+k).value});
 fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
 body:JSON.stringify(d)}).then(r=>r.json()).then(j=>{
