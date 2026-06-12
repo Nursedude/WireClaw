@@ -23,6 +23,7 @@
 
 #include "ble_scan.h"
 #include <NimBLEDevice.h>
+#include <esp_bt.h>
 
 /* Scan duty: 48 ms listening out of every 320 ms (~15%) leaves WiFi most
  * of the airtime on the shared radio. Build-flag tunable per board. */
@@ -53,6 +54,7 @@ enum BleEarsState {
 static BleEarsState s_state = BLE_OFF;
 static int s_tries = 0;
 static const char *s_fail_stage = "";
+static int s_ctrl_status = -1; /* esp_bt_controller_get_status at last fail */
 static unsigned long s_started_ms = 0;
 static unsigned long s_last_tick_ms = 0;
 
@@ -124,9 +126,23 @@ static void bleNowRunning() {
                   (int)CONFIG_BT_NIMBLE_PINNED_TO_CORE);
 }
 
+/* A failed NimBLEDevice::init can leave the BT controller half-initialized
+ * (its memory consumed, status INITED or ENABLED); the next init then dies
+ * on INVALID_STATE forever. Capture the status as the failure witness, then
+ * wind the controller back to IDLE so a retry is a real retry. */
+static void bleCtrlNormalize() {
+    s_ctrl_status = (int)esp_bt_controller_get_status();
+    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED)
+        esp_bt_controller_disable();
+    if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_INITED)
+        esp_bt_controller_deinit();
+}
+
 void bleScanInit() {
     if (!NimBLEDevice::init("")) {
-        Serial.printf("BLE ears: NimBLE init FAILED — retrying from loop\n");
+        bleCtrlNormalize();
+        Serial.printf("BLE ears: NimBLE init FAILED (ctrl status %d) — "
+                      "retrying from loop\n", s_ctrl_status);
         s_state = BLE_INIT_RETRY;
         s_tries = 1;
         return;
@@ -145,9 +161,11 @@ bool bleAvailable() { return s_state == BLE_RUNNING; }
 static void bleGiveUp(const char *stage) {
     /* Retries exhausted: record the stage for ble_stats, then release the
      * stack so a dead scanner does not hold its RAM. deinit no-ops if the
-     * stack never fully initialized. */
+     * stack never fully initialized — the controller wind-down reclaims
+     * what a half-failed init left behind. */
     s_fail_stage = stage;
     NimBLEDevice::deinit(true);
+    bleCtrlNormalize();
     s_state = BLE_GAVE_UP;
     Serial.printf("BLE ears: gave up after %d tries (failed at %s) — "
                   "stack deinitialized\n", s_tries, stage);
@@ -166,6 +184,8 @@ void bleScanTick() {
         if (NimBLEDevice::init("")) {
             if (bleTryStart()) bleNowRunning();
             else s_state = BLE_START_RETRY;
+        } else {
+            bleCtrlNormalize();
         }
         break;
 
@@ -202,9 +222,11 @@ void bleStats(char *out, int out_len) {
         snprintf(out, out_len, "Error: BLE scan not initialized");
         return;
     case BLE_INIT_RETRY:
+        /* ctrl status at last failure: 0=IDLE (controller init/NVS is the
+         * failing call), 1=INITED (enable is), 2=ENABLED (host-side). */
         snprintf(out, out_len,
-                 "Error: BLE init failed (try %d/%d, retrying)",
-                 s_tries, BLE_MAX_TRIES);
+                 "Error: BLE init failed (try %d/%d, ctrl status %d, "
+                 "retrying)", s_tries, BLE_MAX_TRIES, s_ctrl_status);
         return;
     case BLE_START_RETRY:
         snprintf(out, out_len,
@@ -213,8 +235,9 @@ void bleStats(char *out, int out_len) {
         return;
     case BLE_GAVE_UP:
         snprintf(out, out_len,
-                 "Error: BLE gave up after %d tries (failed at %s; stack "
-                 "deinitialized, heap reclaimed)", s_tries, s_fail_stage);
+                 "Error: BLE gave up after %d tries (failed at %s, ctrl "
+                 "status %d; stack deinitialized, heap reclaimed)",
+                 s_tries, s_fail_stage, s_ctrl_status);
         return;
     case BLE_RUNNING:
         break;
