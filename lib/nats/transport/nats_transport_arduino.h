@@ -54,6 +54,35 @@ public:
   }
 
   /**
+   * @brief Set token authentication (call before connect()).
+   *
+   * The pointer is stored, not copied — it must remain valid for the
+   * lifetime of the client (e.g. a static config buffer). NULL or empty
+   * clears. Sent as auth_token in CONNECT; takes precedence over
+   * user/pass.
+   */
+  void setToken(const char *token) {
+    m_client.opts.token =
+        ((token != nullptr) && (token[0] != '\0')) ? token : nullptr;
+  }
+
+  /**
+   * @brief Set user/password authentication (call before connect()).
+   *
+   * Same pointer-lifetime contract as setToken(). NULL or empty user
+   * clears both.
+   */
+  void setUserPass(const char *user, const char *pass) {
+    if ((user != nullptr) && (user[0] != '\0')) {
+      m_client.opts.user = user;
+      m_client.opts.pass = pass;
+    } else {
+      m_client.opts.user = nullptr;
+      m_client.opts.pass = nullptr;
+    }
+  }
+
+  /**
    * @brief Connect to NATS server
    *
    * @param host      Server hostname or IP
