@@ -54,7 +54,7 @@ Returns: device name, firmware version, free heap, registered sensors/actuators 
 
 ### Tool Execution
 
-All 22 tools are available via `tool_exec` (except `remote_chat` - see [Security](#security)):
+All 23 tools are available via `tool_exec` (except `remote_chat` - see [Security](#security)):
 
 ```bash
 # Set LED color
@@ -154,7 +154,7 @@ If you see the device respond with its capabilities, the full stack is connected
 
 The OpenClaw skill lives in `skill/wireclaw/` and contains everything OpenClaw needs:
 
-- **`SKILL.md`** - full reference: protocol, all 22 tools with parameters, constraints (one action per rule, edge-triggered behavior, clock sensors), cross-domain patterns, and worked examples. Derived from WireClaw's actual system prompt so OpenClaw generates correct tool calls on the first try.
+- **`SKILL.md`** - full reference: protocol, all 23 tools with parameters, constraints (one action per rule, edge-triggered behavior, clock sensors), cross-domain patterns, and worked examples. Derived from WireClaw's actual system prompt so OpenClaw generates correct tool calls on the first try.
 - **`scripts/wc.sh`** - convenience wrapper with 4 subcommands:
 
 ```bash

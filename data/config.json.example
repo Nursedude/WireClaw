@@ -10,5 +10,6 @@
   "telegram_token": "",
   "telegram_chat_id": "",
   "telegram_cooldown": "15",
-  "timezone": "UTC0"
+  "timezone": "UTC0",
+  "lora_tx_psk": ""
 }

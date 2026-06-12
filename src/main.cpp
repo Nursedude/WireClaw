@@ -49,6 +49,7 @@ char cfg_telegram_token[64];
 char cfg_telegram_chat_id[16];
 char cfg_system_prompt[4096];
 char cfg_timezone[64];
+char cfg_lora_tx_psk[96];
 int cfg_telegram_cooldown = 3;  /* seconds, 0 = disabled */
 
 /* Placeholder defaults - overridden by LittleFS config.json */
@@ -64,6 +65,7 @@ static void configDefaults() {
     cfg_telegram_token[0] = '\0';
     cfg_telegram_chat_id[0] = '\0';
     strncpy(cfg_timezone, "UTC0", sizeof(cfg_timezone));
+    cfg_lora_tx_psk[0] = '\0';
     strncpy(cfg_system_prompt,
         "You are WireClaw, a helpful AI assistant running on an ESP32 microcontroller. "
         "Be concise. Keep responses under 200 words unless asked for detail.",
@@ -189,6 +191,7 @@ static bool loadConfig() {
             cfg_telegram_cooldown = atoi(cd_buf);
         }
         jsonGetString(json_buf, "timezone", cfg_timezone, sizeof(cfg_timezone));
+        jsonGetString(json_buf, "lora_tx_psk", cfg_lora_tx_psk, sizeof(cfg_lora_tx_psk));
     } else {
         Serial.printf("LittleFS: no config.json, using defaults\n");
     }
@@ -992,7 +995,7 @@ static void onNatsCapabilities(nats_client_t *client, const nats_msg_t *msg,
         "\"device_register\",\"device_list\",\"device_remove\",\"sensor_read\","
         "\"actuator_set\",\"rule_create\",\"rule_list\",\"rule_delete\","
         "\"rule_enable\",\"serial_send\",\"chain_create\",\"display_print\","
-        "\"battery_read\",\"lora_stats\"],");
+        "\"battery_read\",\"lora_stats\",\"mesh_send\"],");
 
     /* Devices */
     w += snprintf(toolCallJsonBuf + w, sizeof(toolCallJsonBuf) - w, "\"devices\":[");
@@ -1638,6 +1641,15 @@ void setup() {
 
     /* RX-only LoRa listener (no-op on builds without WIRECLAW_LORA_SX1262) */
     loraEarsInit();
+    if (cfg_lora_tx_psk[0]) {
+        /* Private channel key from config — never compiled in (mirrors the
+         * nats_token pattern). Built-in public default stands if unset. */
+        if (loraMeshSetPsk(cfg_lora_tx_psk))
+            Serial.printf("LoRa TX: private channel key applied from config\n");
+        else
+            Serial.printf("LoRa TX: config lora_tx_psk INVALID (need 16/32 "
+                          "bytes hex or base64) — keeping public default\n");
+    }
 
     /* Initialize temperature sensor (not available on classic ESP32) */
 #if !defined(CONFIG_IDF_TARGET_ESP32)

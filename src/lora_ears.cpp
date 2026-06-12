@@ -60,6 +60,7 @@
 
 #define MESH_HEADER_LEN 16
 
+
 static SX1262 *s_radio = nullptr; /* constructed in loraEarsInit */
 static bool s_available = false;
 static volatile bool s_rx_flag = false;
@@ -74,6 +75,232 @@ static uint8_t s_last_ch = 0;
 static float s_last_rssi = 0.0f, s_last_snr = 0.0f;
 
 static void IRAM_ATTR onLoraDio1() { s_rx_flag = true; }
+
+#ifdef WIRECLAW_LORA_TX
+#include <mbedtls/aes.h>
+#include <esp_system.h>
+#include <esp_mac.h>
+
+/* GC1109 front-end (Heltec V4.2): CSD enable, VFEM power, PA/TX-enable.
+ * RX worked in Phase 1 without driving these (FEM passes RX through), but
+ * TX needs the PA path powered. Conservative by default — see TX_DBM. */
+#ifndef WIRECLAW_LORA_FEM_CSD
+#define WIRECLAW_LORA_FEM_CSD 2
+#endif
+#ifndef WIRECLAW_LORA_FEM_VPA
+#define WIRECLAW_LORA_FEM_VPA 7
+#endif
+#ifndef WIRECLAW_LORA_FEM_TXEN
+#define WIRECLAW_LORA_FEM_TXEN 46
+#endif
+#ifndef WIRECLAW_LORA_TX_DBM
+#define WIRECLAW_LORA_TX_DBM 2   /* SX1262 drive level — modest first-light EIRP through the FEM */
+#endif
+#ifndef WIRECLAW_LORA_HOP_LIMIT
+#define WIRECLAW_LORA_HOP_LIMIT 3
+#endif
+#ifndef WIRECLAW_LORA_TX_CHANNEL
+#define WIRECLAW_LORA_TX_CHANNEL "LongFast"
+#endif
+#ifndef WIRECLAW_LORA_MIN_TX_INTERVAL_MS
+#define WIRECLAW_LORA_MIN_TX_INTERVAL_MS 30000UL  /* >=30s between sends (airtime restraint) */
+#endif
+
+#define MESH_BROADCAST_ADDR 0xFFFFFFFFu
+#define MESHTASTIC_PORT_TEXT 1
+#define MESH_MAX_TEXT 200
+
+/* Published PUBLIC default key (Meshtastic channel-1 default, "1PG7Oi...AQ==").
+ * Public, not a secret — safe in source. A private channel key is supplied at
+ * runtime via loraMeshSetPsk and never compiled in. */
+static const uint8_t DEFAULT_PUBLIC_PSK[16] = {
+    0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
+    0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01};
+
+static uint8_t s_psk[32];
+static size_t s_psk_len = 16;
+static uint8_t s_channel_hash = 0;
+static uint32_t s_node_id = 0;
+static unsigned long s_last_tx_ms = 0;
+static unsigned long s_tx_count = 0;
+
+static uint8_t xorHash(const uint8_t *p, size_t len) {
+    uint8_t c = 0;
+    for (size_t i = 0; i < len; i++) c ^= p[i];
+    return c;
+}
+
+/* hash = xorHash(channel name) ^ xorHash(psk) — Meshtastic Channels::hash */
+static void recomputeChannelHash() {
+    const char *name = WIRECLAW_LORA_TX_CHANNEL;
+    s_channel_hash = xorHash((const uint8_t *)name, strlen(name)) ^
+                     xorHash(s_psk, s_psk_len);
+}
+
+static int hexNibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* Decode hex (32 or 64 chars) into out; returns byte count or 0 on bad input. */
+static size_t decodeHexKey(const char *str, uint8_t *out, size_t out_max) {
+    size_t slen = strlen(str);
+    if (slen % 2 != 0 || slen / 2 > out_max) return 0;
+    for (size_t i = 0; i < slen; i += 2) {
+        int hi = hexNibble(str[i]), lo = hexNibble(str[i + 1]);
+        if (hi < 0 || lo < 0) return 0;
+        out[i / 2] = (uint8_t)((hi << 4) | lo);
+    }
+    return slen / 2;
+}
+
+static size_t decodeB64Key(const char *str, uint8_t *out, size_t out_max) {
+    /* minimal standard-base64 decoder for 24/44-char keys */
+    auto val = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        if (c == '+') return 62;
+        if (c == '/') return 63;
+        return -1;
+    };
+    size_t slen = strlen(str);
+    while (slen && str[slen - 1] == '=') slen--;
+    size_t out_n = 0;
+    uint32_t acc = 0;
+    int bits = 0;
+    for (size_t i = 0; i < slen; i++) {
+        int v = val(str[i]);
+        if (v < 0) return 0;
+        acc = (acc << 6) | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (out_n >= out_max) return 0;
+            out[out_n++] = (uint8_t)((acc >> bits) & 0xFF);
+        }
+    }
+    return out_n;
+}
+
+bool loraMeshSetPsk(const char *key_str) {
+    if (!key_str || !key_str[0]) {
+        memcpy(s_psk, DEFAULT_PUBLIC_PSK, sizeof(DEFAULT_PUBLIC_PSK));
+        s_psk_len = 16;
+        recomputeChannelHash();
+        return true;
+    }
+    uint8_t tmp[32];
+    size_t n = decodeHexKey(key_str, tmp, sizeof(tmp));
+    if (n == 0) n = decodeB64Key(key_str, tmp, sizeof(tmp));
+    if (n != 16 && n != 32) return false; /* AES-128 or AES-256 only */
+    memcpy(s_psk, tmp, n);
+    s_psk_len = n;
+    recomputeChannelHash();
+    return true;
+}
+
+static void femMode(bool tx) {
+    /* CSD on + VFEM powered for either direction; TX-EN selects PA vs RX. */
+    pinMode(WIRECLAW_LORA_FEM_VPA, OUTPUT);
+    digitalWrite(WIRECLAW_LORA_FEM_VPA, HIGH);
+    pinMode(WIRECLAW_LORA_FEM_CSD, OUTPUT);
+    digitalWrite(WIRECLAW_LORA_FEM_CSD, HIGH);
+    pinMode(WIRECLAW_LORA_FEM_TXEN, OUTPUT);
+    digitalWrite(WIRECLAW_LORA_FEM_TXEN, tx ? HIGH : LOW);
+}
+
+void loraMeshSend(const char *text, char *out, int out_len) {
+    if (!s_available) {
+        snprintf(out, out_len, "Error: LoRa radio not up (init failed)");
+        return;
+    }
+    if (!text || !text[0]) {
+        snprintf(out, out_len, "Error: empty text");
+        return;
+    }
+    size_t tlen = strlen(text);
+    if (tlen > MESH_MAX_TEXT) {
+        snprintf(out, out_len, "Error: text too long (%u > %d)",
+                 (unsigned)tlen, MESH_MAX_TEXT);
+        return;
+    }
+    unsigned long now = millis();
+    if (s_tx_count > 0 &&
+        (now - s_last_tx_ms) < WIRECLAW_LORA_MIN_TX_INTERVAL_MS) {
+        snprintf(out, out_len,
+                 "Error: airtime guard — %lus since last TX, min %lus",
+                 (now - s_last_tx_ms) / 1000UL,
+                 WIRECLAW_LORA_MIN_TX_INTERVAL_MS / 1000UL);
+        return;
+    }
+
+    /* Data protobuf: field1 portnum (varint) + field2 payload (bytes) */
+    uint8_t plain[8 + MESH_MAX_TEXT];
+    size_t pn = 0;
+    plain[pn++] = 0x08;                 /* field 1, varint */
+    plain[pn++] = MESHTASTIC_PORT_TEXT; /* portnum = TEXT_MESSAGE_APP (1) */
+    plain[pn++] = 0x12;                 /* field 2, length-delimited */
+    plain[pn++] = (uint8_t)tlen;        /* len (<=200 fits one byte) */
+    memcpy(&plain[pn], text, tlen);
+    pn += tlen;
+
+    /* AES-CTR nonce: [0:8]=packetId (id in low 4, LE), [8:12]=from (LE) */
+    uint32_t pkt_id = esp_random();
+    if (pkt_id == 0) pkt_id = 1;
+    uint8_t nonce[16];
+    memset(nonce, 0, sizeof(nonce));
+    memcpy(nonce, &pkt_id, 4);
+    memcpy(nonce + 8, &s_node_id, 4);
+
+    uint8_t cipher[sizeof(plain)];
+    mbedtls_aes_context aes;
+    mbedtls_aes_init(&aes);
+    mbedtls_aes_setkey_enc(&aes, s_psk, (unsigned)s_psk_len * 8);
+    size_t nc_off = 0;
+    uint8_t stream_block[16];
+    memset(stream_block, 0, sizeof(stream_block));
+    mbedtls_aes_crypt_ctr(&aes, pn, &nc_off, nonce, stream_block, plain, cipher);
+    mbedtls_aes_free(&aes);
+
+    /* 16-byte header: to from id flags chan next_hop relay */
+    uint8_t pkt[MESH_HEADER_LEN + sizeof(cipher)];
+    uint32_t to = MESH_BROADCAST_ADDR;
+    memcpy(&pkt[0], &to, 4);
+    memcpy(&pkt[4], &s_node_id, 4);
+    memcpy(&pkt[8], &pkt_id, 4);
+    pkt[12] = (uint8_t)((WIRECLAW_LORA_HOP_LIMIT & 0x07) |
+                        ((WIRECLAW_LORA_HOP_LIMIT & 0x07) << 5)); /* hop_limit + hop_start */
+    pkt[13] = s_channel_hash;
+    pkt[14] = 0; /* next_hop */
+    pkt[15] = 0; /* relay_node */
+    memcpy(&pkt[MESH_HEADER_LEN], cipher, pn);
+    size_t pkt_len = MESH_HEADER_LEN + pn;
+
+    /* Half-duplex: leave RX, FEM to TX, transmit, FEM to RX, resume RX. */
+    s_radio->standby();
+    femMode(true);
+    s_radio->setOutputPower(WIRECLAW_LORA_TX_DBM);
+    int st = s_radio->transmit(pkt, pkt_len);
+    femMode(false);
+    s_radio->startReceive();
+
+    if (st != RADIOLIB_ERR_NONE) {
+        snprintf(out, out_len, "Error: TX failed (%d)", st);
+        return;
+    }
+    s_last_tx_ms = millis();
+    s_tx_count++;
+    snprintf(out, out_len,
+             "Sent: ch '%s' (hash 0x%02x) from=!%08x id=0x%08x "
+             "%u bytes @ %d dBm (tx #%lu)",
+             WIRECLAW_LORA_TX_CHANNEL, (unsigned)s_channel_hash,
+             (unsigned)s_node_id, (unsigned)pkt_id, (unsigned)pkt_len,
+             (int)WIRECLAW_LORA_TX_DBM, s_tx_count);
+}
+#endif /* WIRECLAW_LORA_TX */
 
 void loraEarsInit() {
     SPI.begin(WIRECLAW_LORA_SCK, WIRECLAW_LORA_MISO, WIRECLAW_LORA_MOSI,
@@ -105,6 +332,23 @@ void loraEarsInit() {
     }
     s_available = true;
     s_started_ms = millis();
+#ifdef WIRECLAW_LORA_TX
+    /* Node id = low 4 bytes of the EFUSE MAC (Meshtastic convention), so the
+     * claw shows a stable !xxxxxxxx in every receiver's log. Load the public
+     * default channel key + hash; a private key can override at runtime. */
+    {
+        uint8_t mac[6];
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        s_node_id = ((uint32_t)mac[2] << 24) | ((uint32_t)mac[3] << 16) |
+                    ((uint32_t)mac[4] << 8) | (uint32_t)mac[5];
+    }
+    loraMeshSetPsk(nullptr);
+    Serial.printf("LoRa TX ready: node !%08x, ch '%s' hash 0x%02x, "
+                  "%d dBm, min %lus between sends\n",
+                  (unsigned)s_node_id, WIRECLAW_LORA_TX_CHANNEL,
+                  (unsigned)s_channel_hash, (int)WIRECLAW_LORA_TX_DBM,
+                  WIRECLAW_LORA_MIN_TX_INTERVAL_MS / 1000UL);
+#endif
     Serial.printf("LoRa ears: RX-only listening on %.3f MHz "
                   "(bw %.0f kHz, sf %d, cr 4/%d, sync 0x%02X)\n",
                   (double)WIRECLAW_LORA_FREQ_MHZ,

@@ -4,7 +4,7 @@
 
 ## LLM Tools
 
-23 tools available to the AI:
+24 tools available to the AI:
 
 | Tool | Description |
 |------|-------------|
@@ -16,6 +16,7 @@
 | `display_print` | Write a metric line to the OLED status screen (boards with a display) |
 | `battery_read` | Read battery voltage via the VBAT divider (boards with battery sense) |
 | `lora_stats` | RX-only LoRa listener stats — last-heard age, packet/CRC counters (boards with an SX1262) |
+| `mesh_send` | Broadcast a text message onto the Meshtastic LoRa channel (boards with SX1262 TX) |
 | **Device Registry** | |
 | `device_register` | Register a named sensor or actuator |
 | `device_list` | List all devices with current readings |

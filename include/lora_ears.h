@@ -44,4 +44,29 @@ static inline void loraEarsStats(char *, int) {}
 
 #endif /* WIRECLAW_LORA_SX1262 */
 
+/* TX surface gates on WIRECLAW_LORA_TX independently — its stubs must exist
+ * on stock builds too (main/tools call them unconditionally). */
+#ifdef WIRECLAW_LORA_TX
+
+/** Set the TX channel PSK at runtime (base64 or hex; empty = built-in
+ *  public default). Kept OUT of firmware so a private channel key is never
+ *  compiled in (mirrors nats_token). Recomputes the channel hash. Returns
+ *  false on a malformed key (length not 16/32 after decode). */
+bool loraMeshSetPsk(const char *key_str);
+
+/** Broadcast a Meshtastic TEXT_MESSAGE_APP packet on the configured channel.
+ *  Half-duplex: pauses RX, transmits, resumes RX. Enforces a minimum
+ *  inter-TX interval (airtime restraint) and refuses oversize text. Writes
+ *  a human-readable outcome (incl. the node id and packet id) into `out`. */
+void loraMeshSend(const char *text, char *out, int out_len);
+
+#else
+
+static inline bool loraMeshSetPsk(const char *) { return false; }
+static inline void loraMeshSend(const char *, char *out, int out_len) {
+    snprintf(out, out_len, "Error: LoRa TX not built on this device");
+}
+
+#endif /* WIRECLAW_LORA_TX */
+
 #endif /* LORA_EARS_H */

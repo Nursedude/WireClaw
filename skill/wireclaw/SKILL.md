@@ -136,6 +136,11 @@ actuator devices like relays or motors.
   nothing heard yet), then packet/CRC counters and the last plaintext
   header fields (from/to/rssi/snr). Never transmits. Boards without an
   SX1262 return an honest `Error: no LoRa listener on this device`.
+- `mesh_send` - Broadcast text onto the Meshtastic LoRa channel:
+  `{"tool":"mesh_send","text":"hello mesh"}`. Airtime-limited (min interval
+  between sends). Defaults to the PUBLIC channel; a private channel key is
+  set via the `lora_tx_psk` config, never compiled in. Boards without
+  SX1262 TX return `Error: LoRa TX not built on this device`.
 
 ### Sensors & Actuators
 - `device_register` - Register hardware:
