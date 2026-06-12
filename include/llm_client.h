@@ -16,9 +16,20 @@
 /* Global debug flag - toggled via /debug serial command */
 extern bool g_debug;
 
-/* Maximum sizes */
+/* Maximum sizes. The three buffer lengths are build-flag tunable: a
+ * RAM-tight board profile may shrink them to buy heap for other radios
+ * (these statics come straight out of the heap pool). A request that no
+ * longer fits FAILS LOUD ("Request too large for buffer") — never a
+ * silent truncation — so a lean profile degrades honestly. */
+#ifndef LLM_MAX_RESPONSE_LEN
 #define LLM_MAX_RESPONSE_LEN   4096  /* Max content we extract from response */
+#endif
+#ifndef LLM_MAX_REQUEST_LEN
 #define LLM_MAX_REQUEST_LEN    20480 /* Max JSON request body */
+#endif
+#ifndef LLM_MAX_TOOLCALLS_JSON
+#define LLM_MAX_TOOLCALLS_JSON 4096  /* Raw tool_calls JSON kept per response */
+#endif
 #define LLM_READ_TIMEOUT_MS    120000 /* 120s read timeout for LLM response */
 #define LLM_MAX_MESSAGES       26    /* Max messages in conversation (more for tool loops) */
 #define LLM_MAX_TOOL_CALLS     4     /* Max tool calls per LLM response */
@@ -58,7 +69,7 @@ struct LlmResult {
     int  tool_call_count;
 
     /* Raw tool_calls JSON for echoing back in next request */
-    char tool_calls_json[4096];
+    char tool_calls_json[LLM_MAX_TOOLCALLS_JSON];
 };
 
 class LlmClient {

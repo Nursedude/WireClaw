@@ -139,6 +139,10 @@ static void bleCtrlNormalize() {
 }
 
 void bleScanInit() {
+    /* We report every advert ourselves (duplicate filter off), so the
+     * controller's duplicate cache is dead weight — shrink it from the
+     * 100-entry default before the controller allocates it. */
+    NimBLEDevice::setScanDuplicateCacheSize(20);
     if (!NimBLEDevice::init("")) {
         bleCtrlNormalize();
         Serial.printf("BLE ears: NimBLE init FAILED (ctrl status %d) — "
