@@ -8,6 +8,7 @@
 #include "devices.h"
 #include "nats_hal.h"
 #include "rules.h"
+#include "display.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include "soc/soc_caps.h"
@@ -109,6 +110,7 @@ static const char *TOOLS_JSON = R"JSON([
 {"type":"function","function":{"name":"rule_enable","description":"Enable/disable rule","parameters":{"type":"object","properties":{"rule_id":{"type":"string"},"enabled":{"type":"boolean"}},"required":["rule_id","enabled"]}}},
 {"type":"function","function":{"name":"serial_send","description":"Send text over serial_text UART","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text to send (newline appended)"}},"required":["text"]}}},
 {"type":"function","function":{"name":"remote_chat","description":"Chat with another WireClaw device via NATS","parameters":{"type":"object","properties":{"device":{"type":"string"},"message":{"type":"string"}},"required":["device","message"]}}},
+{"type":"function","function":{"name":"display_print","description":"Write a metric line to the OLED status screen (boards with a display). Empty text clears the row.","parameters":{"type":"object","properties":{"row":{"type":"integer","description":"0-based metric row"},"text":{"type":"string","description":"Up to 23 chars; empty clears"}},"required":["row"]}}},
 {"type":"function","function":{"name":"chain_create","description":"Create multi-step automation chain (up to 5 steps) in one call. Steps execute in order with delays.","parameters":{"type":"object","properties":{"sensor_name":{"type":"string","description":"Sensor to monitor"},"condition":{"type":"string","description":"gt|lt|eq|neq|change|always"},"threshold":{"type":"integer"},"interval_seconds":{"type":"integer"},"step1_action":{"type":"string","description":"telegram|led_set|gpio_write|nats_publish|actuator|serial_send"},"step1_message":{"type":"string","description":"For telegram/nats/serial_send"},"step1_r":{"type":"integer"},"step1_g":{"type":"integer"},"step1_b":{"type":"integer"},"step1_pin":{"type":"integer"},"step1_value":{"type":"integer"},"step1_actuator":{"type":"string"},"step1_nats_subject":{"type":"string"},"step2_action":{"type":"string","description":"Action after step1"},"step2_delay":{"type":"integer","description":"Seconds before step2"},"step2_message":{"type":"string"},"step2_r":{"type":"integer"},"step2_g":{"type":"integer"},"step2_b":{"type":"integer"},"step2_pin":{"type":"integer"},"step2_value":{"type":"integer"},"step2_actuator":{"type":"string"},"step2_nats_subject":{"type":"string"},"step3_action":{"type":"string","description":"Step3 (optional)"},"step3_delay":{"type":"integer","description":"Seconds before step3"},"step3_message":{"type":"string"},"step3_r":{"type":"integer"},"step3_g":{"type":"integer"},"step3_b":{"type":"integer"},"step3_pin":{"type":"integer"},"step3_value":{"type":"integer"},"step3_actuator":{"type":"string"},"step3_nats_subject":{"type":"string"},"step4_action":{"type":"string","description":"Step4 (optional)"},"step4_delay":{"type":"integer","description":"Seconds before step4"},"step4_message":{"type":"string"},"step4_r":{"type":"integer"},"step4_g":{"type":"integer"},"step4_b":{"type":"integer"},"step4_pin":{"type":"integer"},"step4_value":{"type":"integer"},"step4_actuator":{"type":"string"},"step4_nats_subject":{"type":"string"},"step5_action":{"type":"string","description":"Step5 (optional)"},"step5_delay":{"type":"integer","description":"Seconds before step5"},"step5_message":{"type":"string"},"step5_r":{"type":"integer"},"step5_g":{"type":"integer"},"step5_b":{"type":"integer"},"step5_pin":{"type":"integer"},"step5_value":{"type":"integer"},"step5_actuator":{"type":"string"},"step5_nats_subject":{"type":"string"}},"required":["sensor_name","condition","threshold","step1_action","step2_action"]}}}
 ])JSON";
 
@@ -916,6 +918,32 @@ static void tool_remote_chat(const char *args, char *result, int result_len) {
 }
 
 /*============================================================================
+ * Display Tool Handler (dude-claw fork — boards with an OLED)
+ *============================================================================*/
+
+static void tool_display_print(const char *args, char *result, int result_len) {
+    if (!displayAvailable()) {
+        /* honest absent: a build without a panel (or a failed init) reports
+         * the truth instead of a silent ok */
+        snprintf(result, result_len, "Error: no display on this device");
+        return;
+    }
+    int row = jsonArgInt(args, "row", -1);
+    char text[DISPLAY_METRIC_COLS];
+    text[0] = '\0';
+    jsonArgString(args, "text", text, sizeof(text)); /* absent/empty = clear */
+    if (!displayPrintRow(row, text)) {
+        snprintf(result, result_len, "Error: row %d out of range (0-%d)",
+                 row, DISPLAY_METRIC_ROWS - 1);
+        return;
+    }
+    if (text[0])
+        snprintf(result, result_len, "Display row %d set: %s", row, text);
+    else
+        snprintf(result, result_len, "Display row %d cleared", row);
+}
+
+/*============================================================================
  * Chain Create — multi-step chain in one call
  *============================================================================*/
 
@@ -1166,6 +1194,8 @@ bool toolExecute(const char *name, const char *args_json,
         tool_serial_send(args_json, result, result_len);
     } else if (strcmp(name, "remote_chat") == 0) {
         tool_remote_chat(args_json, result, result_len);
+    } else if (strcmp(name, "display_print") == 0) {
+        tool_display_print(args_json, result, result_len);
     } else if (strcmp(name, "chain_create") == 0) {
         tool_chain_create(args_json, result, result_len);
     } else {
