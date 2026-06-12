@@ -26,6 +26,7 @@
 #include "nats_hal.h"
 #include "display.h"
 #include "lora_ears.h"
+#include "ble_scan.h"
 #include <nats_esp32.h>
 
 /*============================================================================
@@ -998,7 +999,8 @@ static void onNatsCapabilities(nats_client_t *client, const nats_msg_t *msg,
         "\"device_register\",\"device_list\",\"device_remove\",\"sensor_read\","
         "\"actuator_set\",\"rule_create\",\"rule_list\",\"rule_delete\","
         "\"rule_enable\",\"serial_send\",\"chain_create\",\"display_print\","
-        "\"battery_read\",\"lora_stats\",\"mesh_send\",\"mesh_set_channel\"],");
+        "\"battery_read\",\"lora_stats\",\"mesh_send\",\"mesh_set_channel\","
+        "\"ble_stats\"],");
 
     /* Devices */
     w += snprintf(toolCallJsonBuf + w, sizeof(toolCallJsonBuf) - w, "\"devices\":[");
@@ -1717,6 +1719,11 @@ void setup() {
         Serial.printf("NATS: disabled (no nats_host in config)\n");
     }
 
+    /* Passive BLE listener (no-op on builds without WIRECLAW_BLE). After
+     * WiFi + the first NATS attempt: the brain link comes up before the
+     * second 2.4 GHz user ever touches the shared radio. */
+    bleScanInit();
+
     /* Telegram (optional) */
     if (cfg_telegram_token[0] != '\0' && cfg_telegram_chat_id[0] != '\0') {
         g_telegram_enabled = true;
@@ -1778,6 +1785,9 @@ void loop() {
 
     /* Drain LoRa RX (no-op without radio) */
     loraEarsTick();
+
+    /* BLE scan watchdog (no-op without BLE) — restarts a stopped scan */
+    bleScanTick();
 
     /* Process NATS */
     if (g_nats_enabled) {

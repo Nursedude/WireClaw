@@ -141,6 +141,12 @@ actuator devices like relays or motors.
   between sends). Defaults to the PUBLIC channel; a private channel key is
   set via the `lora_tx_psk` config, never compiled in. Boards without
   SX1262 TX return `Error: LoRa TX not built on this device`.
+- `ble_stats` - Passive BLE advertisement listener stats (no params) ->
+  leads with `ble_adv_age_s` (seconds since last advert heard; since scan
+  start while nothing heard yet), then advert/unique-device counters, last
+  RSSI, and scan-restart counters. Passive observer only — never
+  scan-requests, connects, or advertises. Boards without BLE return an
+  honest `Error: no BLE scanner on this device`.
 
 ### Sensors & Actuators
 - `device_register` - Register hardware:

@@ -10,6 +10,7 @@
 #include "rules.h"
 #include "display.h"
 #include "lora_ears.h"
+#include "ble_scan.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include "soc/soc_caps.h"
@@ -116,6 +117,7 @@ static const char *TOOLS_JSON = R"JSON([
 {"type":"function","function":{"name":"lora_stats","description":"RX-only LoRa listener stats: seconds since last mesh packet heard, packet/CRC counters, last header fields (boards with an SX1262)","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"mesh_send","description":"Broadcast a text message onto the Meshtastic LoRa channel (boards with an SX1262 and TX built). Airtime-limited.","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Message text (<=200 chars)"}},"required":["text"]}}},
 {"type":"function","function":{"name":"mesh_set_channel","description":"Set the LoRa TX channel name and PSK at runtime (RAM only; the key never lands in flash). Returns the resulting channel hash.","parameters":{"type":"object","properties":{"name":{"type":"string","description":"Channel name"},"psk":{"type":"string","description":"16/32-byte key, hex or base64; empty = public default"}},"required":["name"]}}},
+{"type":"function","function":{"name":"ble_stats","description":"Passive BLE advertisement listener stats: seconds since last advert heard, advert/unique-device counters, last RSSI (boards with BLE built)","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"chain_create","description":"Create multi-step automation chain (up to 5 steps) in one call. Steps execute in order with delays.","parameters":{"type":"object","properties":{"sensor_name":{"type":"string","description":"Sensor to monitor"},"condition":{"type":"string","description":"gt|lt|eq|neq|change|always"},"threshold":{"type":"integer"},"interval_seconds":{"type":"integer"},"step1_action":{"type":"string","description":"telegram|led_set|gpio_write|nats_publish|actuator|serial_send"},"step1_message":{"type":"string","description":"For telegram/nats/serial_send"},"step1_r":{"type":"integer"},"step1_g":{"type":"integer"},"step1_b":{"type":"integer"},"step1_pin":{"type":"integer"},"step1_value":{"type":"integer"},"step1_actuator":{"type":"string"},"step1_nats_subject":{"type":"string"},"step2_action":{"type":"string","description":"Action after step1"},"step2_delay":{"type":"integer","description":"Seconds before step2"},"step2_message":{"type":"string"},"step2_r":{"type":"integer"},"step2_g":{"type":"integer"},"step2_b":{"type":"integer"},"step2_pin":{"type":"integer"},"step2_value":{"type":"integer"},"step2_actuator":{"type":"string"},"step2_nats_subject":{"type":"string"},"step3_action":{"type":"string","description":"Step3 (optional)"},"step3_delay":{"type":"integer","description":"Seconds before step3"},"step3_message":{"type":"string"},"step3_r":{"type":"integer"},"step3_g":{"type":"integer"},"step3_b":{"type":"integer"},"step3_pin":{"type":"integer"},"step3_value":{"type":"integer"},"step3_actuator":{"type":"string"},"step3_nats_subject":{"type":"string"},"step4_action":{"type":"string","description":"Step4 (optional)"},"step4_delay":{"type":"integer","description":"Seconds before step4"},"step4_message":{"type":"string"},"step4_r":{"type":"integer"},"step4_g":{"type":"integer"},"step4_b":{"type":"integer"},"step4_pin":{"type":"integer"},"step4_value":{"type":"integer"},"step4_actuator":{"type":"string"},"step4_nats_subject":{"type":"string"},"step5_action":{"type":"string","description":"Step5 (optional)"},"step5_delay":{"type":"integer","description":"Seconds before step5"},"step5_message":{"type":"string"},"step5_r":{"type":"integer"},"step5_g":{"type":"integer"},"step5_b":{"type":"integer"},"step5_pin":{"type":"integer"},"step5_value":{"type":"integer"},"step5_actuator":{"type":"string"},"step5_nats_subject":{"type":"string"}},"required":["sensor_name","condition","threshold","step1_action","step2_action"]}}}
 ])JSON";
 
@@ -171,11 +173,12 @@ static void tool_device_info(const char *args, char *result, int result_len) {
     snprintf(result, result_len,
         "Free heap: %u bytes, Total heap: %u bytes, "
         "Uptime: %lu seconds, "
-        "WiFi: %s, IP: %s, "
+        "WiFi: %s (rssi %d dBm), IP: %s, "
         "Chip: %s rev %d, %d cores, %lu MHz",
         ESP.getFreeHeap(), ESP.getHeapSize(),
         millis() / 1000,
         WiFi.status() == WL_CONNECTED ? "connected" : "disconnected",
+        (int)WiFi.RSSI(),
         WiFi.localIP().toString().c_str(),
         ESP.getChipModel(), ESP.getChipRevision(),
         ESP.getChipCores(), ESP.getCpuFreqMHz());
@@ -1045,6 +1048,19 @@ static void tool_mesh_set_channel(const char *args, char *result,
 }
 
 /*============================================================================
+ * BLE Ears Tool Handler (boards with BLE built; passive observer)
+ *============================================================================*/
+
+static void tool_ble_stats(const char *args, char *result, int result_len) {
+    (void)args;
+    if (!bleAvailable()) {
+        snprintf(result, result_len, "Error: no BLE scanner on this device");
+        return;
+    }
+    bleStats(result, result_len);
+}
+
+/*============================================================================
  * Chain Create — multi-step chain in one call
  *============================================================================*/
 
@@ -1305,6 +1321,8 @@ bool toolExecute(const char *name, const char *args_json,
         tool_mesh_send(args_json, result, result_len);
     } else if (strcmp(name, "mesh_set_channel") == 0) {
         tool_mesh_set_channel(args_json, result, result_len);
+    } else if (strcmp(name, "ble_stats") == 0) {
+        tool_ble_stats(args_json, result, result_len);
     } else if (strcmp(name, "chain_create") == 0) {
         tool_chain_create(args_json, result, result_len);
     } else {

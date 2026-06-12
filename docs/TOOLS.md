@@ -4,7 +4,7 @@
 
 ## LLM Tools
 
-25 tools available to the AI:
+26 tools available to the AI:
 
 | Tool | Description |
 |------|-------------|
@@ -18,6 +18,7 @@
 | `lora_stats` | RX-only LoRa listener stats — last-heard age, packet/CRC counters (boards with an SX1262) |
 | `mesh_send` | Broadcast a text message onto the Meshtastic LoRa channel (boards with SX1262 TX) |
 | `mesh_set_channel` | Set the LoRa TX channel name + PSK at runtime (RAM; key never in flash) |
+| `ble_stats` | Passive BLE advert listener stats — last-advert age, advert/unique counters (BLE builds) |
 | **Device Registry** | |
 | `device_register` | Register a named sensor or actuator |
 | `device_list` | List all devices with current readings |
@@ -31,7 +32,7 @@
 | `rule_enable` | Enable/disable a rule without deleting |
 | `chain_create` | Create a multi-step rule chain (up to 5 steps with delays) |
 | **System** | |
-| `device_info` | Heap, uptime, WiFi, chip info |
+| `device_info` | Heap, uptime, WiFi (incl. RSSI), chip info |
 | `file_read` | Read a file from LittleFS |
 | `file_write` | Write a file to LittleFS |
 | `nats_publish` | Publish to a NATS subject |
