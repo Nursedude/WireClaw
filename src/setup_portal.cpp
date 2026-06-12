@@ -63,6 +63,9 @@ button:hover{background:#00b894}
 <input type="text" name="nats_host" placeholder="192.168.1.x">
 <label>NATS Port</label>
 <input type="text" name="nats_port" value="4222">
+<label>NATS Token</label>
+<input type="password" name="nats_token">
+<p class="opt">Leave empty if the server has no auth</p>
 <div class="sep"></div>
 <label>Telegram Bot Token</label>
 <input type="text" name="telegram_token">
@@ -194,6 +197,9 @@ static bool saveConfig(const char *body) {
     formGetField(body, "nats_port", val, sizeof(val));
     if (val[0] == '\0') strncpy(val, "4222", sizeof(val));
     f.print("  \"nats_port\": "); writeJsonEscaped(f, val); f.print(",\n");
+
+    formGetField(body, "nats_token", val, sizeof(val));
+    f.print("  \"nats_token\": "); writeJsonEscaped(f, val); f.print(",\n");
 
     formGetField(body, "telegram_token", val, sizeof(val));
     f.print("  \"telegram_token\": "); writeJsonEscaped(f, val); f.print(",\n");

@@ -131,6 +131,7 @@ Works with [Ollama](https://ollama.com/), [llama.cpp](https://github.com/ggergan
 | `api_base_url` | LLM endpoint URL (empty = OpenRouter, `http://...` for local LLM) |
 | `nats_host` | NATS server hostname (empty = disabled) |
 | `nats_port` | NATS server port (default: 4222) |
+| `nats_token` | NATS auth token, sent as `auth_token` in CONNECT (empty = no auth) |
 | `telegram_token` | Telegram bot token from [@BotFather](https://t.me/BotFather) (empty = disabled) |
 | `telegram_chat_id` | Allowed Telegram chat ID |
 | `telegram_cooldown` | Minimum seconds between Telegram messages per rule (default: 60, 0 = disabled) |

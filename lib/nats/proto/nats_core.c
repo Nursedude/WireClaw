@@ -195,16 +195,37 @@ static nats_err_t handle_info(nats_client_t *client, const char *json) {
  */
 static nats_err_t send_connect(nats_client_t *client) {
   nats_err_t err;
+  char auth_frag[NATS_MAX_AUTH_FRAG];
+  int auth_len = 0;
 
-  /* Build minimal CONNECT JSON */
-  /* TODO: Add auth fields when configured */
+  /* Optional auth fragment. Token takes precedence over user/pass,
+   * matching reference client behavior. Values are written verbatim
+   * (no heap, no escaper) — credentials containing '"' or '\' are not
+   * supported and will be rejected by the server as a malformed CONNECT,
+   * which surfaces as a failed handshake rather than a silent downgrade. */
+  auth_frag[0] = '\0';
+  if ((client->opts.token != NULL) && (client->opts.token[0] != '\0')) {
+    auth_len = snprintf(auth_frag, sizeof(auth_frag), ",\"auth_token\":\"%s\"",
+                        client->opts.token);
+  } else if ((client->opts.user != NULL) && (client->opts.user[0] != '\0')) {
+    auth_len = snprintf(auth_frag, sizeof(auth_frag),
+                        ",\"user\":\"%s\",\"pass\":\"%s\"", client->opts.user,
+                        (client->opts.pass != NULL) ? client->opts.pass : "");
+  }
+  if ((auth_len < 0) || ((size_t)auth_len >= sizeof(auth_frag))) {
+    /* A truncated credential would authenticate as the WRONG credential —
+     * fail loudly instead of sending it. */
+    return NATS_ERR_BUFFER_OVERFLOW;
+  }
+
+  /* Build CONNECT JSON */
   err = send_linef(
       client,
       "CONNECT {\"verbose\":%s,\"pedantic\":%s,\"name\":\"%s\","
-      "\"lang\":\"c\",\"version\":\"%s\",\"protocol\":1,\"echo\":%s}",
+      "\"lang\":\"c\",\"version\":\"%s\",\"protocol\":1,\"echo\":%s%s}",
       client->opts.verbose ? "true" : "false",
       client->opts.pedantic ? "true" : "false", client->name, NATS_VERSION_STR,
-      client->opts.echo ? "true" : "false");
+      client->opts.echo ? "true" : "false", auth_frag);
 
   if (err != NATS_OK) {
     return err;
