@@ -45,6 +45,7 @@ char cfg_device_name[32];
 char cfg_api_base_url[128];
 char cfg_nats_host[64];
 int  cfg_nats_port = 4222;
+char cfg_nats_token[96];
 char cfg_telegram_token[64];
 char cfg_telegram_chat_id[16];
 char cfg_system_prompt[4096];
@@ -61,6 +62,7 @@ static void configDefaults() {
     cfg_api_base_url[0] = '\0';
     cfg_nats_host[0] = '\0';
     cfg_nats_port = 4222;
+    cfg_nats_token[0] = '\0';
     cfg_telegram_token[0] = '\0';
     cfg_telegram_chat_id[0] = '\0';
     strncpy(cfg_timezone, "UTC0", sizeof(cfg_timezone));
@@ -182,6 +184,7 @@ static bool loadConfig() {
         if (jsonGetString(json_buf, "nats_port", port_buf, sizeof(port_buf))) {
             cfg_nats_port = atoi(port_buf);
         }
+        jsonGetString(json_buf, "nats_token", cfg_nats_token, sizeof(cfg_nats_token));
         jsonGetString(json_buf, "telegram_token", cfg_telegram_token, sizeof(cfg_telegram_token));
         jsonGetString(json_buf, "telegram_chat_id", cfg_telegram_chat_id, sizeof(cfg_telegram_chat_id));
         char cd_buf[8];
@@ -1120,9 +1123,11 @@ static void buildNatsSubjects() {
  * Connect to NATS server and subscribe to topics.
  */
 static bool connectNats() {
-    Serial.printf("NATS: connecting to %s:%d...\n", cfg_nats_host, cfg_nats_port);
+    Serial.printf("NATS: connecting to %s:%d%s...\n", cfg_nats_host, cfg_nats_port,
+                  cfg_nats_token[0] ? " (token auth)" : "");
 
     natsClient.onEvent(onNatsEvent, nullptr);
+    natsClient.setToken(cfg_nats_token); /* static buffer; empty clears */
 
     if (!natsClient.connect(cfg_nats_host, (uint16_t)cfg_nats_port, 2000)) {
         Serial.printf("NATS: connection failed\n");
@@ -1566,8 +1571,9 @@ void handleSerialCommand(const char *input) {
         Serial.printf("API key:   %.8s...\n", cfg_api_key);
         Serial.printf("Model:     %s\n", cfg_model);
         Serial.printf("Device:    %s\n", cfg_device_name);
-        Serial.printf("NATS:      %s:%d (%s)\n", cfg_nats_host, cfg_nats_port,
-                      g_nats_enabled ? "enabled" : "disabled");
+        Serial.printf("NATS:      %s:%d (%s%s)\n", cfg_nats_host, cfg_nats_port,
+                      g_nats_enabled ? "enabled" : "disabled",
+                      cfg_nats_token[0] ? ", token auth" : "");
         Serial.printf("Telegram:  %s\n", g_telegram_enabled ? "enabled" : "disabled");
         Serial.printf("Prompt:    %d chars\n", (int)strlen(cfg_system_prompt));
         Serial.printf("> ");
