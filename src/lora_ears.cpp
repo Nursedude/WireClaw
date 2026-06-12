@@ -148,35 +148,48 @@ static int hexNibble(char c) {
     return -1;
 }
 
-/* Decode hex (32 or 64 chars) into out; returns byte count or 0 on bad input. */
+/* Decode hex into out; returns byte count or 0 on bad input. Tolerant of a
+ * leading 0x, and of whitespace / ':' separators (e.g. "aa:bb cc"). */
 static size_t decodeHexKey(const char *str, uint8_t *out, size_t out_max) {
-    size_t slen = strlen(str);
-    if (slen % 2 != 0 || slen / 2 > out_max) return 0;
-    for (size_t i = 0; i < slen; i += 2) {
-        int hi = hexNibble(str[i]), lo = hexNibble(str[i + 1]);
-        if (hi < 0 || lo < 0) return 0;
-        out[i / 2] = (uint8_t)((hi << 4) | lo);
+    if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) str += 2;
+    size_t out_n = 0;
+    int hi = -1;
+    for (const char *p = str; *p; p++) {
+        char c = *p;
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ':')
+            continue;
+        int nib = hexNibble(c);
+        if (nib < 0) return 0;
+        if (hi < 0) {
+            hi = nib;
+        } else {
+            if (out_n >= out_max) return 0;
+            out[out_n++] = (uint8_t)((hi << 4) | nib);
+            hi = -1;
+        }
     }
-    return slen / 2;
+    if (hi >= 0) return 0; /* odd nibble count */
+    return out_n;
 }
 
 static size_t decodeB64Key(const char *str, uint8_t *out, size_t out_max) {
-    /* minimal standard-base64 decoder for 24/44-char keys */
+    /* base64 standard AND url-safe (- _); skips whitespace and '=' padding. */
     auto val = [](char c) -> int {
         if (c >= 'A' && c <= 'Z') return c - 'A';
         if (c >= 'a' && c <= 'z') return c - 'a' + 26;
         if (c >= '0' && c <= '9') return c - '0' + 52;
-        if (c == '+') return 62;
-        if (c == '/') return 63;
+        if (c == '+' || c == '-') return 62;
+        if (c == '/' || c == '_') return 63;
         return -1;
     };
-    size_t slen = strlen(str);
-    while (slen && str[slen - 1] == '=') slen--;
     size_t out_n = 0;
     uint32_t acc = 0;
     int bits = 0;
-    for (size_t i = 0; i < slen; i++) {
-        int v = val(str[i]);
+    for (const char *p = str; *p; p++) {
+        char c = *p;
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '=')
+            continue;
+        int v = val(c);
         if (v < 0) return 0;
         acc = (acc << 6) | (uint32_t)v;
         bits += 6;
@@ -188,6 +201,11 @@ static size_t decodeB64Key(const char *str, uint8_t *out, size_t out_max) {
     }
     return out_n;
 }
+
+/* Bytes the last key decode produced (diagnostic only — a length, not the
+ * key). -1 before any attempt. */
+static int s_last_key_len = -1;
+int loraLastKeyLen() { return s_last_key_len; }
 
 uint8_t loraMeshChannelHash() { return s_channel_hash; }
 
@@ -268,12 +286,14 @@ bool loraMeshSetPsk(const char *key_str) {
     if (!key_str || !key_str[0]) {
         memcpy(s_psk, DEFAULT_PUBLIC_PSK, sizeof(DEFAULT_PUBLIC_PSK));
         s_psk_len = 16;
+        s_last_key_len = 16;
         recomputeChannelHash();
         return true;
     }
     uint8_t tmp[32];
     size_t n = decodeHexKey(key_str, tmp, sizeof(tmp));
-    if (n == 0) n = decodeB64Key(key_str, tmp, sizeof(tmp));
+    if (n != 16 && n != 32) n = decodeB64Key(key_str, tmp, sizeof(tmp));
+    s_last_key_len = (int)n;
     if (n != 16 && n != 32) return false; /* AES-128 or AES-256 only */
     memcpy(s_psk, tmp, n);
     s_psk_len = n;

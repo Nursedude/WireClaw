@@ -1020,9 +1020,17 @@ static void tool_mesh_set_channel(const char *args, char *result,
         return;
     }
     if (!loraMeshSetChannel(name, psk)) {
-        snprintf(result, result_len,
-                 "Error: bad channel/key (need 16/32-byte hex or base64), "
-                 "or TX not built");
+        int kl = loraLastKeyLen();
+        if (kl >= 0 && kl != 16 && kl != 32)
+            /* length only — never the key — tells hex/base64 OK but wrong size
+             * vs an unparseable format (kl==0) */
+            snprintf(result, result_len,
+                     "Error: key decoded to %d bytes, need 16 or 32 "
+                     "(check the PSK is complete)", kl);
+        else
+            snprintf(result, result_len,
+                     "Error: PSK not recognized as hex or base64 (or TX not "
+                     "built) — check format");
         return;
     }
     /* Optional durability: persist to the device's own flash so a reboot

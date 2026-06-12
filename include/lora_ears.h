@@ -72,6 +72,9 @@ void loraLoadPersistedChannel();
 /** Forget any persisted channel (revert to the public default on next boot). */
 void loraClearPersistedChannel();
 
+/** Bytes the last PSK decode produced (diagnostic; a length, not the key). */
+int loraLastKeyLen();
+
 /** Broadcast a Meshtastic TEXT_MESSAGE_APP packet on the configured channel.
  *  Half-duplex: pauses RX, transmits, resumes RX. Enforces a minimum
  *  inter-TX interval (airtime restraint) and refuses oversize text. Writes
@@ -90,6 +93,7 @@ static inline bool loraPersistChannel(const char *, const char *) {
 }
 static inline void loraLoadPersistedChannel() {}
 static inline void loraClearPersistedChannel() {}
+static inline int loraLastKeyLen() { return -1; }
 static inline void loraMeshSend(const char *, char *out, int out_len) {
     snprintf(out, out_len, "Error: LoRa TX not built on this device");
 }
