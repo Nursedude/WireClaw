@@ -4,7 +4,7 @@
 
 ## LLM Tools
 
-22 tools available to the AI:
+23 tools available to the AI:
 
 | Tool | Description |
 |------|-------------|
@@ -15,6 +15,7 @@
 | `temperature_read` | Read chip temperature (Celsius) |
 | `display_print` | Write a metric line to the OLED status screen (boards with a display) |
 | `battery_read` | Read battery voltage via the VBAT divider (boards with battery sense) |
+| `lora_stats` | RX-only LoRa listener stats — last-heard age, packet/CRC counters (boards with an SX1262) |
 | **Device Registry** | |
 | `device_register` | Register a named sensor or actuator |
 | `device_list` | List all devices with current readings |

@@ -234,9 +234,9 @@ The rule loop and the AI loop share the same `loop()` function but serve differe
 - **Telegram Alerts** - rules send push notifications with live sensor values via `{device_name}` interpolation, no LLM in the loop
 - **Device Registry** - named sensors and actuators instead of raw pin numbers, persisted to flash
 - **Serial Bridge** - connect any serial device (Arduino, GPS, CO2 sensor) via UART1; read data as a sensor, send commands via `serial_send`, use in rules with `{name:msg}` interpolation
-- **AI Agent** - agentic loop with 22 tools, up to 5 iterations per message
+- **AI Agent** - agentic loop with 23 tools, up to 5 iterations per message
 - **Local LLM** - use a local server (Ollama, llama.cpp) over HTTP instead of cloud API
-- **OpenClaw Integration** - [OpenClaw](https://github.com/openclaw) (or any NATS client) can execute tools directly on the ESP32 without involving WireClaw's LLM. Flat JSON protocol, device discovery, 21 tools available. Includes a skill and wrapper script.
+- **OpenClaw Integration** - [OpenClaw](https://github.com/openclaw) (or any NATS client) can execute tools directly on the ESP32 without involving WireClaw's LLM. Flat JSON protocol, device discovery, 22 tools available. Includes a skill and wrapper script.
 - **Multi-Device Mesh** - devices talk to each other over NATS via `remote_chat`
 - **Telegram Bot** - chat with your ESP32 from your phone
 - **NATS Virtual Sensors** - subscribe to any NATS subject as a sensor, trigger rules from external systems (Python, Home Assistant, PLCs, other WireClaws)

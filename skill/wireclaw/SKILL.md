@@ -131,6 +131,11 @@ actuator devices like relays or motors.
 - `battery_read` - Read battery voltage (no params) -> volts + raw ADC mV.
   Boards without battery sense return an honest
   `Error: no battery sense on this device`.
+- `lora_stats` - RX-only LoRa listener stats (no params) -> leads with
+  `mesh_heard_age_s` (seconds since last packet; since radio start while
+  nothing heard yet), then packet/CRC counters and the last plaintext
+  header fields (from/to/rssi/snr). Never transmits. Boards without an
+  SX1262 return an honest `Error: no LoRa listener on this device`.
 
 ### Sensors & Actuators
 - `device_register` - Register hardware:

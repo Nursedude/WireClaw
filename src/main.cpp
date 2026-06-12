@@ -25,6 +25,7 @@
 #include "web_config.h"
 #include "nats_hal.h"
 #include "display.h"
+#include "lora_ears.h"
 #include <nats_esp32.h>
 
 /*============================================================================
@@ -991,7 +992,7 @@ static void onNatsCapabilities(nats_client_t *client, const nats_msg_t *msg,
         "\"device_register\",\"device_list\",\"device_remove\",\"sensor_read\","
         "\"actuator_set\",\"rule_create\",\"rule_list\",\"rule_delete\","
         "\"rule_enable\",\"serial_send\",\"chain_create\",\"display_print\","
-        "\"battery_read\"],");
+        "\"battery_read\",\"lora_stats\"],");
 
     /* Devices */
     w += snprintf(toolCallJsonBuf + w, sizeof(toolCallJsonBuf) - w, "\"devices\":[");
@@ -1635,6 +1636,9 @@ void setup() {
      * After loadConfig so the boot screen can show the device name. */
     displayInit();
 
+    /* RX-only LoRa listener (no-op on builds without WIRECLAW_LORA_SX1262) */
+    loraEarsInit();
+
     /* Initialize temperature sensor (not available on classic ESP32) */
 #if !defined(CONFIG_IDF_TARGET_ESP32)
     initTempSensor();
@@ -1746,6 +1750,9 @@ void loop() {
 
     /* Status display redraw (rate-limited internally; no-op without panel) */
     displayTick(g_nats_enabled && natsClient.connected());
+
+    /* Drain LoRa RX (no-op without radio) */
+    loraEarsTick();
 
     /* Process NATS */
     if (g_nats_enabled) {
