@@ -4,7 +4,7 @@
 
 ## LLM Tools
 
-21 tools available to the AI:
+22 tools available to the AI:
 
 | Tool | Description |
 |------|-------------|
@@ -14,6 +14,7 @@
 | `gpio_read` | Read digital state of a GPIO pin |
 | `temperature_read` | Read chip temperature (Celsius) |
 | `display_print` | Write a metric line to the OLED status screen (boards with a display) |
+| `battery_read` | Read battery voltage via the VBAT divider (boards with battery sense) |
 | **Device Registry** | |
 | `device_register` | Register a named sensor or actuator |
 | `device_list` | List all devices with current readings |

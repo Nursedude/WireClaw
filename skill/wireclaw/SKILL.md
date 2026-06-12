@@ -128,6 +128,9 @@ actuator devices like relays or motors.
   display): `{"tool":"display_print","row":0,"text":"pump: OK 42.1C"}`
   - Empty text clears the row. Boards without a panel return an honest
     `Error: no display on this device` - never a silent ok.
+- `battery_read` - Read battery voltage (no params) -> volts + raw ADC mV.
+  Boards without battery sense return an honest
+  `Error: no battery sense on this device`.
 
 ### Sensors & Actuators
 - `device_register` - Register hardware:
