@@ -4,7 +4,7 @@
 
 ## LLM Tools
 
-20 tools available to the AI:
+21 tools available to the AI:
 
 | Tool | Description |
 |------|-------------|
@@ -13,6 +13,7 @@
 | `gpio_write` | Set a GPIO pin HIGH or LOW |
 | `gpio_read` | Read digital state of a GPIO pin |
 | `temperature_read` | Read chip temperature (Celsius) |
+| `display_print` | Write a metric line to the OLED status screen (boards with a display) |
 | **Device Registry** | |
 | `device_register` | Register a named sensor or actuator |
 | `device_list` | List all devices with current readings |

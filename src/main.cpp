@@ -24,6 +24,7 @@
 #include "version.h"
 #include "web_config.h"
 #include "nats_hal.h"
+#include "display.h"
 #include <nats_esp32.h>
 
 /*============================================================================
@@ -78,7 +79,14 @@ void led(uint8_t r, uint8_t g, uint8_t b) {
     r = (uint8_t)((r * ledBrightness) / 255);
     g = (uint8_t)((g * ledBrightness) / 255);
     b = (uint8_t)((b * ledBrightness) / 255);
-#ifdef RGB_BUILTIN
+#ifdef WIRECLAW_STATUS_LED
+    /* Boards like the Heltec V4 have no WS2812 — the generic devkit's
+     * RGB_BUILTIN would drive an empty pin. Map intensity onto the board's
+     * white LED (GPIO35, "LED_Write" on the official pinmap) so actuations
+     * are actually visible. */
+    pinMode(WIRECLAW_STATUS_LED, OUTPUT);
+    analogWrite(WIRECLAW_STATUS_LED, max(r, max(g, b)));
+#elif defined(RGB_BUILTIN)
     rgbLedWrite(RGB_BUILTIN, r, g, b);
 #elif defined(LED_BUILTIN)
     pinMode(LED_BUILTIN, OUTPUT);
@@ -982,7 +990,7 @@ static void onNatsCapabilities(nats_client_t *client, const nats_msg_t *msg,
         "\"file_read\",\"file_write\",\"nats_publish\",\"temperature_read\","
         "\"device_register\",\"device_list\",\"device_remove\",\"sensor_read\","
         "\"actuator_set\",\"rule_create\",\"rule_list\",\"rule_delete\","
-        "\"rule_enable\",\"serial_send\",\"chain_create\"],");
+        "\"rule_enable\",\"serial_send\",\"chain_create\",\"display_print\"],");
 
     /* Devices */
     w += snprintf(toolCallJsonBuf + w, sizeof(toolCallJsonBuf) - w, "\"devices\":[");
@@ -1622,6 +1630,10 @@ void setup() {
     historyLoad();
     Serial.printf("Model: %s\n", cfg_model);
 
+    /* Status display (no-op on builds without WIRECLAW_OLED).
+     * After loadConfig so the boot screen can show the device name. */
+    displayInit();
+
     /* Initialize temperature sensor (not available on classic ESP32) */
 #if !defined(CONFIG_IDF_TARGET_ESP32)
     initTempSensor();
@@ -1638,12 +1650,14 @@ void setup() {
 
     if (cfg_wifi_ssid[0] == '\0') {
         Serial.printf("\n[!] No WiFi config — starting setup portal\n");
+        displayShowSetupMode();
         runSetupPortal(); /* blocks until config saved + reboot */
     }
 
     /* Connect WiFi */
     if (!connectWiFi()) {
         Serial.printf("[!] WiFi failed — starting setup portal\n");
+        displayShowSetupMode();
         runSetupPortal(); /* blocks until config saved + reboot */
     }
 
@@ -1728,6 +1742,9 @@ void loop() {
 
     /* Process web config requests */
     webConfigLoop();
+
+    /* Status display redraw (rate-limited internally; no-op without panel) */
+    displayTick(g_nats_enabled && natsClient.connected());
 
     /* Process NATS */
     if (g_nats_enabled) {

@@ -124,6 +124,10 @@ actuator devices like relays or motors.
 - `gpio_write` - Set GPIO pin: `{"tool":"gpio_write","pin":N,"value":0|1}`
 - `gpio_read` - Read GPIO pin: `{"tool":"gpio_read","pin":N}` -> HIGH/LOW
 - `temperature_read` - Read chip temperature (no params) -> degrees C
+- `display_print` - Write a metric row on the OLED status screen (boards with a
+  display): `{"tool":"display_print","row":0,"text":"pump: OK 42.1C"}`
+  - Empty text clears the row. Boards without a panel return an honest
+    `Error: no display on this device` - never a silent ok.
 
 ### Sensors & Actuators
 - `device_register` - Register hardware:
