@@ -1053,10 +1053,8 @@ static void tool_mesh_set_channel(const char *args, char *result,
 
 static void tool_ble_stats(const char *args, char *result, int result_len) {
     (void)args;
-    if (!bleAvailable()) {
-        snprintf(result, result_len, "Error: no BLE scanner on this device");
-        return;
-    }
+    /* No availability gate: while the scan is down, bleStats reports WHICH
+     * stage failed and the retry state (the stub covers non-BLE builds). */
     bleStats(result, result_len);
 }
 

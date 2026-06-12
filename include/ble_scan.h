@@ -41,7 +41,9 @@ void bleScanTick();
 /** Format stats into `out`. The FIRST number is ble_adv_age_s (seconds
  *  since the last advertisement heard — or since scan start while nothing
  *  has been heard yet: an honest lower bound, so "deaf forever" can still
- *  alarm). */
+ *  alarm). While the scan is NOT running this reports WHY (which stage
+ *  failed, retry count) — the serial console is invisible in deployment,
+ *  so the tool is the only honest window into a failure. */
 void bleStats(char *out, int out_len);
 
 #else /* !WIRECLAW_BLE — no-ops; callers need no #ifdefs */
@@ -49,7 +51,9 @@ void bleStats(char *out, int out_len);
 static inline void bleScanInit() {}
 static inline bool bleAvailable() { return false; }
 static inline void bleScanTick() {}
-static inline void bleStats(char *, int) {}
+static inline void bleStats(char *out, int out_len) {
+    snprintf(out, out_len, "Error: no BLE scanner on this device");
+}
 
 #endif /* WIRECLAW_BLE */
 
