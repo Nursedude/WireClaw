@@ -982,7 +982,7 @@ static void onNatsCapabilities(nats_client_t *client, const nats_msg_t *msg,
         "\"file_read\",\"file_write\",\"nats_publish\",\"temperature_read\","
         "\"device_register\",\"device_list\",\"device_remove\",\"sensor_read\","
         "\"actuator_set\",\"rule_create\",\"rule_list\",\"rule_delete\","
-        "\"rule_enable\",\"serial_send\",\"chain_create\"],");
+        "\"rule_enable\",\"serial_send\",\"chain_create\",\"host_probe\"],");
 
     /* Devices */
     w += snprintf(toolCallJsonBuf + w, sizeof(toolCallJsonBuf) - w, "\"devices\":[");

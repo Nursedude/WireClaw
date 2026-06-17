@@ -17,6 +17,10 @@
 #if !defined(CONFIG_IDF_TARGET_ESP32)
 #include "driver/temperature_sensor.h"
 #endif
+#include <lwip/sockets.h>
+#include <lwip/inet.h>
+#include <fcntl.h>
+#include <errno.h>
 
 /* Forward declarations (defined in main.cpp) */
 extern void led(uint8_t r, uint8_t g, uint8_t b);
@@ -109,6 +113,7 @@ static const char *TOOLS_JSON = R"JSON([
 {"type":"function","function":{"name":"rule_enable","description":"Enable/disable rule","parameters":{"type":"object","properties":{"rule_id":{"type":"string"},"enabled":{"type":"boolean"}},"required":["rule_id","enabled"]}}},
 {"type":"function","function":{"name":"serial_send","description":"Send text over serial_text UART","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text to send (newline appended)"}},"required":["text"]}}},
 {"type":"function","function":{"name":"remote_chat","description":"Chat with another WireClaw device via NATS","parameters":{"type":"object","properties":{"device":{"type":"string"},"message":{"type":"string"}},"required":["device","message"]}}},
+{"type":"function","function":{"name":"host_probe","description":"Out-of-band TCP liveness probe of another host on the LAN. Distinguishes a wedged-userspace freeze (IP stack answers but the app port serves nothing) from an unreachable host/path. Pass a numeric IPv4. Returns ip_alive/app_open/banner/kstack/rtt_ms.","parameters":{"type":"object","properties":{"host":{"type":"string","description":"Target IPv4 (numeric, e.g. 10.0.0.5)"},"app_port":{"type":"integer","description":"App port that emits a banner on connect, e.g. 22 (sshd). Default 22"},"closed_port":{"type":"integer","description":"A normally-closed port, for a kernel-alive RST check. Default 9"},"timeout_ms":{"type":"integer","description":"Per-connect timeout 100-3000. Default 1200"}},"required":["host"]}}},
 {"type":"function","function":{"name":"chain_create","description":"Create multi-step automation chain (up to 5 steps) in one call. Steps execute in order with delays.","parameters":{"type":"object","properties":{"sensor_name":{"type":"string","description":"Sensor to monitor"},"condition":{"type":"string","description":"gt|lt|eq|neq|change|always"},"threshold":{"type":"integer"},"interval_seconds":{"type":"integer"},"step1_action":{"type":"string","description":"telegram|led_set|gpio_write|nats_publish|actuator|serial_send"},"step1_message":{"type":"string","description":"For telegram/nats/serial_send"},"step1_r":{"type":"integer"},"step1_g":{"type":"integer"},"step1_b":{"type":"integer"},"step1_pin":{"type":"integer"},"step1_value":{"type":"integer"},"step1_actuator":{"type":"string"},"step1_nats_subject":{"type":"string"},"step2_action":{"type":"string","description":"Action after step1"},"step2_delay":{"type":"integer","description":"Seconds before step2"},"step2_message":{"type":"string"},"step2_r":{"type":"integer"},"step2_g":{"type":"integer"},"step2_b":{"type":"integer"},"step2_pin":{"type":"integer"},"step2_value":{"type":"integer"},"step2_actuator":{"type":"string"},"step2_nats_subject":{"type":"string"},"step3_action":{"type":"string","description":"Step3 (optional)"},"step3_delay":{"type":"integer","description":"Seconds before step3"},"step3_message":{"type":"string"},"step3_r":{"type":"integer"},"step3_g":{"type":"integer"},"step3_b":{"type":"integer"},"step3_pin":{"type":"integer"},"step3_value":{"type":"integer"},"step3_actuator":{"type":"string"},"step3_nats_subject":{"type":"string"},"step4_action":{"type":"string","description":"Step4 (optional)"},"step4_delay":{"type":"integer","description":"Seconds before step4"},"step4_message":{"type":"string"},"step4_r":{"type":"integer"},"step4_g":{"type":"integer"},"step4_b":{"type":"integer"},"step4_pin":{"type":"integer"},"step4_value":{"type":"integer"},"step4_actuator":{"type":"string"},"step4_nats_subject":{"type":"string"},"step5_action":{"type":"string","description":"Step5 (optional)"},"step5_delay":{"type":"integer","description":"Seconds before step5"},"step5_message":{"type":"string"},"step5_r":{"type":"integer"},"step5_g":{"type":"integer"},"step5_b":{"type":"integer"},"step5_pin":{"type":"integer"},"step5_value":{"type":"integer"},"step5_actuator":{"type":"string"},"step5_nats_subject":{"type":"string"}},"required":["sensor_name","condition","threshold","step1_action","step2_action"]}}}
 ])JSON";
 
@@ -1117,6 +1122,115 @@ static void tool_chain_create(const char *args, char *result, int result_len) {
 }
 
 /*============================================================================
+ * host_probe — out-of-band LAN liveness probe
+ *
+ * Honest-by-design (see honest_failure_modes.md): a bare TCP SYN-ACK is NOT
+ * read as "healthy". The kernel completes a handshake even when userspace is
+ * swap-wedged (sshd never accept()s), so we read an unsolicited banner to
+ * tell "serving" from "kernel-only". A RST (ECONNREFUSED) to any port proves
+ * the remote IP stack is alive; total silence means host/path is down.
+ *============================================================================*/
+
+/* Returns: 1 connected (SYN-ACK), 0 refused (RST, host alive), -1 no-response
+ * (timeout), -2 local error. On a successful connect, fills rtt_ms and, if the
+ * peer sends unsolicited bytes within ~800ms, banner_bytes. */
+static int hp_probe_port(const char *ip, int port, int timeout_ms,
+                         int *out_rtt_ms, int *out_banner_bytes) {
+    if (out_rtt_ms) *out_rtt_ms = -1;
+    if (out_banner_bytes) *out_banner_bytes = 0;
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)port);
+    addr.sin_addr.s_addr = inet_addr(ip);
+    if (addr.sin_addr.s_addr == INADDR_NONE) return -2;  /* not a numeric IPv4 */
+
+    int s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s < 0) return -2;
+
+    int flags = fcntl(s, F_GETFL, 0);
+    fcntl(s, F_SETFL, flags | O_NONBLOCK);
+
+    uint32_t t0 = millis();
+    int result;
+    int rc = connect(s, (struct sockaddr *)&addr, sizeof(addr));
+    if (rc == 0) {
+        result = 1;                                    /* immediate connect */
+    } else if (errno != EINPROGRESS) {
+        result = (errno == ECONNREFUSED) ? 0 : -1;     /* RST = host alive */
+    } else {
+        fd_set wf;
+        FD_ZERO(&wf);
+        FD_SET(s, &wf);
+        struct timeval tv;
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+        int sel = select(s + 1, NULL, &wf, NULL, &tv);
+        if (sel <= 0) {
+            result = -1;                               /* no response in window */
+        } else {
+            int soerr = 0;
+            socklen_t l = sizeof(soerr);
+            getsockopt(s, SOL_SOCKET, SO_ERROR, &soerr, &l);
+            if (soerr == 0)                  result = 1;
+            else if (soerr == ECONNREFUSED)  result = 0;   /* RST = host alive */
+            else                             result = -1;
+        }
+    }
+
+    if (result == 1) {
+        if (out_rtt_ms) *out_rtt_ms = (int)(millis() - t0);
+        if (out_banner_bytes) {
+            /* blocking read with a short receive timeout: did the app speak? */
+            fcntl(s, F_SETFL, flags);                  /* clear O_NONBLOCK */
+            struct timeval rtv;
+            rtv.tv_sec = 0;
+            rtv.tv_usec = 800 * 1000;
+            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));
+            char buf[64];
+            int n = recv(s, buf, sizeof(buf), 0);
+            if (n > 0) *out_banner_bytes = n;
+        }
+    }
+
+    close(s);
+    return result;
+}
+
+static void tool_host_probe(const char *args, char *result, int result_len) {
+    char host[46] = {0};
+    if (!jsonArgString(args, "host", host, sizeof(host))) {
+        snprintf(result, result_len, "Error: missing 'host' argument");
+        return;
+    }
+    int app_port    = jsonArgInt(args, "app_port", 22);
+    int closed_port = jsonArgInt(args, "closed_port", 9);
+    int timeout_ms  = jsonArgInt(args, "timeout_ms", 1200);
+    if (timeout_ms < 100)  timeout_ms = 100;
+    if (timeout_ms > 3000) timeout_ms = 3000;
+
+    esp_task_wdt_reset();
+    int app_rtt = -1, banner = 0;
+    int app = hp_probe_port(host, app_port, timeout_ms, &app_rtt, &banner);
+    esp_task_wdt_reset();
+    int cl_rtt = -1;
+    int cl = hp_probe_port(host, closed_port, timeout_ms, &cl_rtt, NULL);
+    esp_task_wdt_reset();
+
+    /* ip_alive: any definite TCP-level answer (SYN-ACK or RST) from either port.
+     * kstack: the closed port answered at all => the remote IP stack is alive. */
+    int ip_alive = (app == 1 || app == 0 || cl == 1 || cl == 0) ? 1 : 0;
+    int kstack   = (cl == 1 || cl == 0) ? 1 : 0;
+    int rtt      = (app_rtt >= 0) ? app_rtt : cl_rtt;
+    const char *app_state = (app == 1) ? "open" : (app == 0 ? "refused" : "timeout");
+
+    snprintf(result, result_len,
+             "host_probe %s: ip_alive=%d app%d=%s banner=%dB kstack=%d rtt_ms=%d",
+             host, ip_alive, app_port, app_state, banner, kstack, rtt);
+}
+
+/*============================================================================
  * Public API
  *============================================================================*/
 
@@ -1168,6 +1282,8 @@ bool toolExecute(const char *name, const char *args_json,
         tool_remote_chat(args_json, result, result_len);
     } else if (strcmp(name, "chain_create") == 0) {
         tool_chain_create(args_json, result, result_len);
+    } else if (strcmp(name, "host_probe") == 0) {
+        tool_host_probe(args_json, result, result_len);
     } else {
         snprintf(result, result_len, "Error: unknown tool '%s'", name);
         return false;
