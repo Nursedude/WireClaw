@@ -3,6 +3,6 @@
 
 /* dude-claw fork marker (+dudeclaw.N, same convention as the fleet's RNS
  * +mf.N pins). Upstream base: 0.4.0. See FORK.md for the convergence plan. */
-#define WIRECLAW_VERSION "0.4.0+dudeclaw.12"
+#define WIRECLAW_VERSION "0.4.0+dudeclaw.14"
 
 #endif
