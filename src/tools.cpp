@@ -1133,7 +1133,7 @@ static void tool_chain_create(const char *args, char *result, int result_len) {
 
 /* Returns: 1 connected (SYN-ACK), 0 refused (RST, host alive), -1 no-response
  * (timeout), -2 local error. On a successful connect, fills rtt_ms and, if the
- * peer sends unsolicited bytes within ~800ms, banner_bytes. */
+ * peer sends unsolicited bytes within ~2500ms, banner_bytes. */
 static int hp_probe_port(const char *ip, int port, int timeout_ms,
                          int *out_rtt_ms, int *out_banner_bytes) {
     if (out_rtt_ms) *out_rtt_ms = -1;
@@ -1182,11 +1182,17 @@ static int hp_probe_port(const char *ip, int port, int timeout_ms,
     if (result == 1) {
         if (out_rtt_ms) *out_rtt_ms = (int)(millis() - t0);
         if (out_banner_bytes) {
-            /* blocking read with a short receive timeout: did the app speak? */
+            /* blocking read with a receive timeout: did the app speak? The
+             * window is 2500ms (was 800ms): a loaded Pi Zero W (the .32 bot
+             * under swap-thrash, 2026-06-19) completes the TCP handshake but
+             * can't be scheduled to emit its sshd banner inside 800ms, so the
+             * probe read banner=0 and reported a false HOST_FROZEN on a
+             * healthy-but-busy box. Split across tv_sec/tv_usec because
+             * tv_usec must be < 1e6 (POSIX) — 2500*1000 in tv_usec is malformed. */
             fcntl(s, F_SETFL, flags);                  /* clear O_NONBLOCK */
             struct timeval rtv;
-            rtv.tv_sec = 0;
-            rtv.tv_usec = 800 * 1000;
+            rtv.tv_sec = 2;
+            rtv.tv_usec = 500 * 1000;
             setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &rtv, sizeof(rtv));
             char buf[64];
             int n = recv(s, buf, sizeof(buf), 0);
