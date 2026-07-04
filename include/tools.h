@@ -41,4 +41,31 @@ bool toolExecute(const char *name, const char *args_json,
  */
 float batteryReadVolts(unsigned int *adc_mv_out);
 
+/*
+ * On-device agent tool restriction (WIRECLAW_AGENT_TOOLS_RESTRICTED).
+ *
+ * The on-device LLM agent's tool surface can be compile-time restricted to
+ * display/LED/read-only sensors — actuation, RF transmission, filesystem,
+ * bus reach and self-rewiring stay behind the NATS tool_exec path (the
+ * brain's ratified rules), which is NOT affected by this flag. Without the
+ * flag both calls fall through to the full set, so existing builds are
+ * byte-identical.
+ */
+#ifdef WIRECLAW_AGENT_TOOLS_RESTRICTED
+
+/** Tool definitions the on-device agent is offered (filtered allowlist). */
+const char *toolsGetAgentDefinitions();
+
+/** True when the on-device agent may execute this tool. */
+bool toolAllowedForAgent(const char *name);
+
+#else /* unrestricted builds: the agent sees the full tool set */
+
+static inline const char *toolsGetAgentDefinitions() {
+    return toolsGetDefinitions();
+}
+static inline bool toolAllowedForAgent(const char *) { return true; }
+
+#endif /* WIRECLAW_AGENT_TOOLS_RESTRICTED */
+
 #endif /* TOOLS_H */

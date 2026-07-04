@@ -458,7 +458,9 @@ const char *chatWithLLM(const char *userMessage) {
     Serial.printf("\n--- Thinking... ---\n");
     unsigned long t0 = millis();
 
-    const char *tools_json = toolsGetDefinitions();
+    /* Restricted-profile builds offer the agent a filtered tool set; all
+     * other builds fall through to the full definitions (inline no-op). */
+    const char *tools_json = toolsGetAgentDefinitions();
     static LlmResult result;
     int totalPromptTokens = 0;
     int totalCompletionTokens = 0;
@@ -511,8 +513,17 @@ const char *chatWithLLM(const char *userMessage) {
 
             Serial.printf("  -> %s(%s)\n", tc->name, tc->arguments);
 
-            toolExecute(tc->name, tc->arguments,
-                        toolResultBufs[t], TOOL_RESULT_MAX_LEN);
+            if (!toolAllowedForAgent(tc->name)) {
+                /* Restricted profile: the model sees an honest refusal and
+                 * can adapt. The NATS tool_exec path is unaffected — the
+                 * brain's ratified rules keep their full surface. */
+                snprintf(toolResultBufs[t], TOOL_RESULT_MAX_LEN,
+                         "Error: tool '%s' is not permitted for the "
+                         "on-device agent (restricted profile)", tc->name);
+            } else {
+                toolExecute(tc->name, tc->arguments,
+                            toolResultBufs[t], TOOL_RESULT_MAX_LEN);
+            }
 
             Serial.printf("     = %s\n", toolResultBufs[t]);
 

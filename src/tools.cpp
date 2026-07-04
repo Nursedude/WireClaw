@@ -1323,6 +1323,96 @@ const char *toolsGetDefinitions() {
     return TOOLS_JSON;
 }
 
+#ifdef WIRECLAW_AGENT_TOOLS_RESTRICTED
+
+/* Tools the ON-DEVICE LLM agent may call: display/LED/read-only sensors
+ * ONLY (dude-claw W5 charter). The NATS tool_exec path stays FULL — the
+ * brain's ratified rules remain the sanctioned actuation route.
+ * Deliberately excluded, and why:
+ *   gpio_write/gpio_read/actuator_set/serial_send  physical pins
+ *   mesh_send/mesh_set_channel   RF transmission — Part-97/airtime judgment
+ *                                is never delegated to a 4B model
+ *   nats_publish/remote_chat     bus reach / agent recursion
+ *   file_read/file_write         /config.json carries the WiFi + channel
+ *                                secrets; an LLM loop must not read them
+ *   rule_create, rule_delete, rule_enable, chain_create,
+ *   device_register, device_remove               self-rewiring
+ *   host_probe                   LAN probing under LLM control
+ *   display_tier                 evidence-based claim owned by the brain's
+ *                                pusher (same exclusion as mini's allowlist)
+ */
+static const char *AGENT_TOOL_ALLOWLIST[] = {
+    "led_set", "display_print", "display_alert", "temperature_read",
+    "battery_read", "lora_stats", "ble_stats", "device_info",
+    "sensor_read", "device_list", "rule_list", NULL,
+};
+
+bool toolAllowedForAgent(const char *name) {
+    if (!name || !name[0]) return false;
+    for (int i = 0; AGENT_TOOL_ALLOWLIST[i]; i++) {
+        if (strcmp(name, AGENT_TOOL_ALLOWLIST[i]) == 0) return true;
+    }
+    return false;
+}
+
+const char *toolsGetAgentDefinitions() {
+    /* Filter TOOLS_JSON down to the allowlist. Entries are one-per-line in
+     * the source string, so this is a line filter; built once. On overflow
+     * the agent gets an EMPTY tools array plus a serial error — a silently
+     * truncated tool list would be a lie the model acts on. */
+    static char buf[4096];
+    static bool built = false;
+    if (built) return buf;
+    built = true;
+    int w = 0;
+    buf[w++] = '[';
+    const char *p = TOOLS_JSON;
+    while (*p && *p != '\n') p++; /* skip the opening '[' line */
+    if (*p) p++;
+    bool first = true;
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        int len = eol ? (int)(eol - p) : (int)strlen(p);
+        const char *nm = strstr(p, "\"name\":\"");
+        bool keep = false;
+        if (nm && (!eol || nm < eol)) {
+            nm += 8;
+            const char *nend = strchr(nm, '"');
+            char name[48];
+            int nlen = nend ? (int)(nend - nm) : 0;
+            if (nlen > 0 && nlen < (int)sizeof(name)) {
+                memcpy(name, nm, nlen);
+                name[nlen] = '\0';
+                keep = toolAllowedForAgent(name);
+            }
+        }
+        if (keep) {
+            int copy = len;
+            while (copy > 0 && (p[copy - 1] == ',' || p[copy - 1] == '\r'))
+                copy--;
+            if (w + copy + 3 >= (int)sizeof(buf)) {
+                Serial.printf("[Agent] restricted tool list overflow — the "
+                              "agent gets NO tools rather than a truncated "
+                              "list\n");
+                strcpy(buf, "[]");
+                return buf;
+            }
+            if (!first) buf[w++] = ',';
+            buf[w++] = '\n';
+            memcpy(buf + w, p, copy);
+            w += copy;
+            first = false;
+        }
+        if (!eol) break;
+        p = eol + 1;
+    }
+    buf[w++] = ']';
+    buf[w] = '\0';
+    return buf;
+}
+
+#endif /* WIRECLAW_AGENT_TOOLS_RESTRICTED */
+
 bool toolExecute(const char *name, const char *args_json,
                   char *result, int result_len) {
     if (strcmp(name, "led_set") == 0) {
