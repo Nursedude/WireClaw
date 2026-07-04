@@ -162,6 +162,18 @@ void bleScanInit() {
 
 bool bleAvailable() { return s_state == BLE_RUNNING; }
 
+unsigned long bleAdvCount() { return s_advs; }
+
+int bleUniqCount() { return s_uniq; }
+
+long bleAdvAgeS() {
+    if (!bleAvailable()) return -1;
+    /* Same honest lower bound as bleStats: nothing-heard-yet reports time
+     * since scan start so a deaf scanner still reads as aging. */
+    unsigned long last = s_advs ? s_last_adv_ms : s_started_ms;
+    return (long)((millis() - last) / 1000UL);
+}
+
 static void bleGiveUp(const char *stage) {
     /* Retries exhausted: record the stage for ble_stats, then release the
      * stack so a dead scanner does not hold its RAM. deinit no-ops if the

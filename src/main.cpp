@@ -999,6 +999,7 @@ static void onNatsCapabilities(nats_client_t *client, const nats_msg_t *msg,
         "\"device_register\",\"device_list\",\"device_remove\",\"sensor_read\","
         "\"actuator_set\",\"rule_create\",\"rule_list\",\"rule_delete\","
         "\"rule_enable\",\"serial_send\",\"chain_create\",\"display_print\","
+        "\"display_tier\",\"display_alert\","
         "\"battery_read\",\"lora_stats\",\"mesh_send\",\"mesh_set_channel\","
         "\"ble_stats\"],");
 

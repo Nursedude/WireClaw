@@ -31,4 +31,14 @@ const char *toolsGetDefinitions();
 bool toolExecute(const char *name, const char *args_json,
                   char *result, int result_len);
 
+/**
+ * Measure battery voltage via the switched VBAT divider. One measurement
+ * path shared by the battery_read tool and the display's SELF page — two
+ * copies would drift.
+ *
+ * @param adc_mv_out  optional raw ADC millivolts (may be NULL)
+ * @return volts, or NAN on builds without battery sense
+ */
+float batteryReadVolts(unsigned int *adc_mv_out);
+
 #endif /* TOOLS_H */

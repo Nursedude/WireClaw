@@ -4,7 +4,7 @@
 
 ## LLM Tools
 
-26 tools available to the AI:
+28 tools available to the AI:
 
 | Tool | Description |
 |------|-------------|
@@ -14,6 +14,8 @@
 | `gpio_read` | Read digital state of a GPIO pin |
 | `temperature_read` | Read chip temperature (Celsius) |
 | `display_print` | Write a metric line to the OLED status screen (boards with a display) |
+| `display_tier` | Set the brain-tier glyph (F/L/R); the device decays it to SOLO when pushes stop (pages builds) |
+| `display_alert` | Show/clear an inverted alert banner with a locally ticking age (pages builds) |
 | `battery_read` | Read battery voltage via the VBAT divider (boards with battery sense) |
 | `lora_stats` | RX-only LoRa listener stats — last-heard age, packet/CRC counters (boards with an SX1262) |
 | `mesh_send` | Broadcast a text message onto the Meshtastic LoRa channel (boards with SX1262 TX) |

@@ -399,6 +399,15 @@ void loraMeshSend(const char *text, char *out, int out_len) {
              (unsigned)s_node_id, (unsigned)pkt_id, (unsigned)pkt_len,
              (int)WIRECLAW_LORA_TX_DBM, s_tx_count);
 }
+
+unsigned long loraMeshTxCount() { return s_tx_count; }
+
+long loraMeshTxGuardRemainS() {
+    if (s_tx_count == 0) return 0; /* never sent: guard has nothing to hold */
+    unsigned long since = millis() - s_last_tx_ms;
+    if (since >= WIRECLAW_LORA_MIN_TX_INTERVAL_MS) return 0;
+    return (long)((WIRECLAW_LORA_MIN_TX_INTERVAL_MS - since) / 1000UL) + 1;
+}
 #endif /* WIRECLAW_LORA_TX */
 
 void loraEarsInit() {
@@ -511,6 +520,16 @@ void loraEarsStats(char *out, int out_len) {
              (now - s_last_heard_ms) / 1000UL, s_heard, s_crc_err, s_runts,
              (unsigned)s_last_from, (unsigned)s_last_to, (unsigned)s_last_ch,
              (double)s_last_rssi, (double)s_last_snr);
+}
+
+unsigned long loraEarsHeardCount() { return s_heard; }
+
+long loraEarsHeardAgeS() {
+    if (!s_available) return -1;
+    /* Same honest lower bound as loraEarsStats: never-heard reports time
+     * since radio start so a deaf node still reads as aging. */
+    unsigned long last = s_heard ? s_last_heard_ms : s_started_ms;
+    return (long)((millis() - last) / 1000UL);
 }
 
 #endif /* WIRECLAW_LORA_SX1262 */

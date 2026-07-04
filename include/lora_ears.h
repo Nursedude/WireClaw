@@ -35,12 +35,22 @@ void loraEarsTick();
  *  heard yet: an honest lower bound, so "deaf forever" can still alarm). */
 void loraEarsStats(char *out, int out_len);
 
+/** Packets heard since radio start (0 when the radio never initialized). */
+unsigned long loraEarsHeardCount();
+
+/** Seconds since the last packet heard — or since radio start while nothing
+ *  has been heard (the same honest lower bound as loraEarsStats). -1 while
+ *  the radio is not listening. */
+long loraEarsHeardAgeS();
+
 #else /* !WIRECLAW_LORA_SX1262 — no-ops; callers need no #ifdefs */
 
 static inline void loraEarsInit() {}
 static inline bool loraEarsAvailable() { return false; }
 static inline void loraEarsTick() {}
 static inline void loraEarsStats(char *, int) {}
+static inline unsigned long loraEarsHeardCount() { return 0; }
+static inline long loraEarsHeardAgeS() { return -1; }
 
 #endif /* WIRECLAW_LORA_SX1262 */
 
@@ -81,6 +91,13 @@ int loraLastKeyLen();
  *  a human-readable outcome (incl. the node id and packet id) into `out`. */
 void loraMeshSend(const char *text, char *out, int out_len);
 
+/** Packets transmitted since boot (0 on builds without a TX surface). */
+unsigned long loraMeshTxCount();
+
+/** Seconds until the airtime guard allows the next send; 0 = ready now
+ *  (also 0 on builds without a TX surface — there is nothing to wait on). */
+long loraMeshTxGuardRemainS();
+
 #else
 
 static inline bool loraMeshSetPsk(const char *) { return false; }
@@ -97,6 +114,8 @@ static inline int loraLastKeyLen() { return -1; }
 static inline void loraMeshSend(const char *, char *out, int out_len) {
     snprintf(out, out_len, "Error: LoRa TX not built on this device");
 }
+static inline unsigned long loraMeshTxCount() { return 0; }
+static inline long loraMeshTxGuardRemainS() { return 0; }
 
 #endif /* WIRECLAW_LORA_TX */
 

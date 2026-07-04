@@ -46,6 +46,17 @@ void bleScanTick();
  *  so the tool is the only honest window into a failure. */
 void bleStats(char *out, int out_len);
 
+/** Advertisements heard since scan start (incl. repeats). */
+unsigned long bleAdvCount();
+
+/** Distinct MACs seen (caps at the small tracking table's size). */
+int bleUniqCount();
+
+/** Seconds since the last advertisement — or since scan start while nothing
+ *  has been heard (the same honest lower bound as bleStats). -1 while the
+ *  scan is not running. */
+long bleAdvAgeS();
+
 #else /* !WIRECLAW_BLE — no-ops; callers need no #ifdefs */
 
 static inline void bleScanInit() {}
@@ -54,6 +65,9 @@ static inline void bleScanTick() {}
 static inline void bleStats(char *out, int out_len) {
     snprintf(out, out_len, "Error: no BLE scanner on this device");
 }
+static inline unsigned long bleAdvCount() { return 0; }
+static inline int bleUniqCount() { return 0; }
+static inline long bleAdvAgeS() { return -1; }
 
 #endif /* WIRECLAW_BLE */
 

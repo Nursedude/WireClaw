@@ -113,6 +113,8 @@ static const char *TOOLS_JSON = R"JSON([
 {"type":"function","function":{"name":"serial_send","description":"Send text over serial_text UART","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text to send (newline appended)"}},"required":["text"]}}},
 {"type":"function","function":{"name":"remote_chat","description":"Chat with another WireClaw device via NATS","parameters":{"type":"object","properties":{"device":{"type":"string"},"message":{"type":"string"}},"required":["device","message"]}}},
 {"type":"function","function":{"name":"display_print","description":"Write a metric line to the OLED status screen (boards with a display). Empty text clears the row.","parameters":{"type":"object","properties":{"row":{"type":"integer","description":"0-based metric row"},"text":{"type":"string","description":"Up to 23 chars; empty clears"}},"required":["row"]}}},
+{"type":"function","function":{"name":"display_tier","description":"Set the brain-tier glyph on the OLED status screen: F=frontier, L=local LLM, R=rules-only. The device decays it on its own clock when pushes stop (15 min adds '?', 30 min becomes SOLO).","parameters":{"type":"object","properties":{"tier":{"type":"string","description":"F, L or R"}},"required":["tier"]}}},
+{"type":"function","function":{"name":"display_alert","description":"Show an inverted alert banner (signal class + locally ticking age) on the OLED status page. Empty class clears it; nothing else does.","parameters":{"type":"object","properties":{"class":{"type":"string","description":"Signal class, up to 23 chars; empty clears"},"age_s":{"type":"integer","description":"Alert age in seconds at push time"}}}}},
 {"type":"function","function":{"name":"battery_read","description":"Read battery voltage in volts (boards with a VBAT divider)","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"lora_stats","description":"RX-only LoRa listener stats: seconds since last mesh packet heard, packet/CRC counters, last header fields (boards with an SX1262)","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"mesh_send","description":"Broadcast a text message onto the Meshtastic LoRa channel (boards with an SX1262 and TX built). Airtime-limited.","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Message text (<=200 chars)"}},"required":["text"]}}},
@@ -951,6 +953,50 @@ static void tool_display_print(const char *args, char *result, int result_len) {
         snprintf(result, result_len, "Display row %d cleared", row);
 }
 
+static void tool_display_tier(const char *args, char *result, int result_len) {
+    if (!displayAvailable()) {
+        snprintf(result, result_len, "Error: no display on this device");
+        return;
+    }
+    char t[8];
+    t[0] = '\0';
+    jsonArgString(args, "tier", t, sizeof(t));
+    if (!t[0] || t[1] != '\0' ||
+        (t[0] != 'F' && t[0] != 'L' && t[0] != 'R')) {
+        snprintf(result, result_len, "Error: tier must be F, L or R");
+        return;
+    }
+    if (!displaySetTier(t[0])) {
+        snprintf(result, result_len,
+                 "Error: display pages not built on this device");
+        return;
+    }
+    snprintf(result, result_len,
+             "Brain tier set: %c (decays to SOLO if pushes stop)", t[0]);
+}
+
+static void tool_display_alert(const char *args, char *result, int result_len) {
+    if (!displayAvailable()) {
+        snprintf(result, result_len, "Error: no display on this device");
+        return;
+    }
+    char cls[DISPLAY_METRIC_COLS];
+    cls[0] = '\0';
+    jsonArgString(args, "class", cls, sizeof(cls)); /* absent/empty = clear */
+    int age_s = jsonArgInt(args, "age_s", 0);
+    if (!displaySetAlert(cls, age_s)) {
+        snprintf(result, result_len,
+                 "Error: display pages not built on this device");
+        return;
+    }
+    if (cls[0])
+        snprintf(result, result_len,
+                 "Alert banner up: %s (age %ds, ticking locally; only an "
+                 "empty class clears it)", cls, age_s);
+    else
+        snprintf(result, result_len, "Alert banner cleared");
+}
+
 /*============================================================================
  * Battery Read Tool Handler (boards with a switched VBAT divider)
  *============================================================================*/
@@ -961,8 +1007,7 @@ static void tool_display_print(const char *args, char *result, int result_len) {
 #endif
 #endif
 
-static void tool_battery_read(const char *args, char *result, int result_len) {
-    (void)args;
+float batteryReadVolts(unsigned int *adc_mv_out) {
 #ifdef WIRECLAW_VBAT_ADC
     /* Heltec-style battery sense: a GPIO-switched divider feeds VBAT/SCALE
      * into the ADC. The divider is switched in only for the read — it draws
@@ -983,12 +1028,23 @@ static void tool_battery_read(const char *args, char *result, int result_len) {
 #ifdef WIRECLAW_VBAT_CTRL
     digitalWrite(WIRECLAW_VBAT_CTRL, LOW);
 #endif
-    float vbat = ((float)mv / 1000.0f) * WIRECLAW_VBAT_SCALE;
-    snprintf(result, result_len, "Battery: %.2f V (adc %u mV)",
-             vbat, (unsigned)mv);
+    if (adc_mv_out) *adc_mv_out = (unsigned int)mv;
+    return ((float)mv / 1000.0f) * WIRECLAW_VBAT_SCALE;
 #else
-    snprintf(result, result_len, "Error: no battery sense on this device");
+    (void)adc_mv_out;
+    return NAN;
 #endif
+}
+
+static void tool_battery_read(const char *args, char *result, int result_len) {
+    (void)args;
+    unsigned int mv = 0;
+    float vbat = batteryReadVolts(&mv);
+    if (isnan(vbat)) {
+        snprintf(result, result_len, "Error: no battery sense on this device");
+        return;
+    }
+    snprintf(result, result_len, "Battery: %.2f V (adc %u mV)", vbat, mv);
 }
 
 /*============================================================================
@@ -1311,6 +1367,10 @@ bool toolExecute(const char *name, const char *args_json,
         tool_remote_chat(args_json, result, result_len);
     } else if (strcmp(name, "display_print") == 0) {
         tool_display_print(args_json, result, result_len);
+    } else if (strcmp(name, "display_tier") == 0) {
+        tool_display_tier(args_json, result, result_len);
+    } else if (strcmp(name, "display_alert") == 0) {
+        tool_display_alert(args_json, result, result_len);
     } else if (strcmp(name, "battery_read") == 0) {
         tool_battery_read(args_json, result, result_len);
     } else if (strcmp(name, "lora_stats") == 0) {

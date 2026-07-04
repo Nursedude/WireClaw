@@ -128,6 +128,17 @@ actuator devices like relays or motors.
   display): `{"tool":"display_print","row":0,"text":"pump: OK 42.1C"}`
   - Empty text clears the row. Boards without a panel return an honest
     `Error: no display on this device` - never a silent ok.
+- `display_tier` - Set the brain-tier glyph on the status screen:
+  `{"tool":"display_tier","tier":"F"}` (F=frontier, L=local LLM, R=rules-only).
+  - The DEVICE decays the glyph on its own clock when pushes stop: 15 min
+    adds `?`, 30 min becomes `SOLO` - a dead brain cannot leave a
+    fresh-looking claim on the glass. Builds without pages return an honest
+    `Error: display pages not built on this device`.
+- `display_alert` - Show an inverted alert banner on the status page:
+  `{"tool":"display_alert","class":"host_frozen","age_s":120}`
+  - The age ticks locally; ONLY an explicit empty class
+    (`{"tool":"display_alert","class":""}`) clears the banner, so losing
+    NATS mid-alert leaves it up with the age still climbing.
 - `battery_read` - Read battery voltage (no params) -> volts + raw ADC mV.
   Boards without battery sense return an honest
   `Error: no battery sense on this device`.
