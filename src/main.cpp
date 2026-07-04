@@ -25,6 +25,7 @@
 #include "web_config.h"
 #include "nats_hal.h"
 #include "display.h"
+#include "anomaly.h"
 #include "lora_ears.h"
 #include "ble_scan.h"
 #include <nats_esp32.h>
@@ -1012,7 +1013,7 @@ static void onNatsCapabilities(nats_client_t *client, const nats_msg_t *msg,
         "\"rule_enable\",\"serial_send\",\"chain_create\",\"display_print\","
         "\"display_tier\",\"display_alert\","
         "\"battery_read\",\"lora_stats\",\"mesh_send\",\"mesh_set_channel\","
-        "\"ble_stats\"],");
+        "\"ble_stats\",\"anomaly_stats\"],");
 
     /* Devices */
     w += snprintf(toolCallJsonBuf + w, sizeof(toolCallJsonBuf) - w, "\"devices\":[");
@@ -1658,6 +1659,10 @@ void setup() {
 
     /* RX-only LoRa listener (no-op on builds without WIRECLAW_LORA_SX1262) */
     loraEarsInit();
+
+    /* Edge anomaly witness (no-op without WIRECLAW_ANOMALY) — after the
+     * listeners so its first samples see real surfaces. */
+    anomalyInit();
     if (cfg_lora_tx_channel[0]) {
         /* Private channel (name + key) from config — never compiled in
          * (mirrors nats_token). Built-in public default stands if unset. */
@@ -1797,6 +1802,9 @@ void loop() {
 
     /* Drain LoRa RX (no-op without radio) */
     loraEarsTick();
+
+    /* Anomaly witness sampler (rate-limited internally; no-op without it) */
+    anomalyTick();
 
     /* BLE scan watchdog (no-op without BLE) — restarts a stopped scan */
     bleScanTick();

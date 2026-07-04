@@ -158,6 +158,13 @@ actuator devices like relays or motors.
   RSSI, and scan-restart counters. Passive observer only — never
   scan-requests, connects, or advertises. Boards without BLE return an
   honest `Error: no BLE scanner on this device`.
+- `anomaly_stats` - Edge anomaly witness (no params) -> leads with
+  `anomaly_score` = max |z| of current telemetry (heap/temp/RSSI/rx-rate)
+  vs exponentially-weighted self-learned baselines, then per-feature
+  z-scores and the top deviating feature. **-1 while the baseline is still
+  learning** (~1 h after boot) — an unwarmed baseline never reads as
+  "all normal". Witness only; it never actuates. Boards without the
+  witness return an honest `Error: no anomaly witness on this device`.
 
 ### Sensors & Actuators
 - `device_register` - Register hardware:
