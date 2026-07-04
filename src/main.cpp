@@ -1001,7 +1001,7 @@ static void onNatsCapabilities(nats_client_t *client, const nats_msg_t *msg,
         "\"rule_enable\",\"serial_send\",\"chain_create\",\"display_print\","
         "\"display_tier\",\"display_alert\","
         "\"battery_read\",\"lora_stats\",\"mesh_send\",\"mesh_set_channel\","
-        "\"ble_stats\"],");
+        "\"ble_stats\",\"host_probe\"],");
 
     /* Devices */
     w += snprintf(toolCallJsonBuf + w, sizeof(toolCallJsonBuf) - w, "\"devices\":[");
