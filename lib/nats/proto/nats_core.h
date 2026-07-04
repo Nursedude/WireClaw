@@ -79,6 +79,11 @@ extern "C" {
 #define NATS_MAX_NAME_LEN 32U
 #endif
 
+/** Maximum CONNECT auth fragment length (token or user/pass incl. JSON keys) */
+#ifndef NATS_MAX_AUTH_FRAG
+#define NATS_MAX_AUTH_FRAG 160U
+#endif
+
 /*============================================================================
  * Compile-Time Safety Checks
  *
@@ -340,6 +345,9 @@ typedef struct {
 
 typedef struct {
   const char *name;            /**< Client name (NULL for default) */
+  /* Auth pointers are stored, not copied (no heap): they must stay valid
+   * for the client lifetime, e.g. static config buffers. Sent in CONNECT;
+   * token takes precedence over user/pass. */
   const char *user;            /**< Username (NULL if no auth) */
   const char *pass;            /**< Password (NULL if no auth) */
   const char *token;           /**< Auth token (NULL if no auth) */
