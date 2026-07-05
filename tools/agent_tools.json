@@ -1,0 +1,177 @@
+[
+{
+"type": "function",
+"function": {
+"name": "led_set",
+"description": "Set RGB LED 0-255",
+"parameters": {
+"type": "object",
+"properties": {
+"r": {
+"type": "integer"
+},
+"g": {
+"type": "integer"
+},
+"b": {
+"type": "integer"
+}
+},
+"required": [
+"r",
+"g",
+"b"
+]
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "device_info",
+"description": "Get heap, uptime, WiFi, chip info",
+"parameters": {
+"type": "object",
+"properties": {}
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "temperature_read",
+"description": "Read chip temperature (C)",
+"parameters": {
+"type": "object",
+"properties": {}
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "device_list",
+"description": "List registered devices",
+"parameters": {
+"type": "object",
+"properties": {}
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "sensor_read",
+"description": "Read named sensor value",
+"parameters": {
+"type": "object",
+"properties": {
+"name": {
+"type": "string"
+}
+},
+"required": [
+"name"
+]
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "rule_list",
+"description": "List all rules",
+"parameters": {
+"type": "object",
+"properties": {}
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "display_print",
+"description": "Write a metric line to the OLED status screen (boards with a display). Empty text clears the row.",
+"parameters": {
+"type": "object",
+"properties": {
+"row": {
+"type": "integer",
+"description": "0-based metric row"
+},
+"text": {
+"type": "string",
+"description": "Up to 23 chars; empty clears"
+}
+},
+"required": [
+"row"
+]
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "display_alert",
+"description": "Show an inverted alert banner (signal class + locally ticking age) on the OLED status page. Empty class clears it; nothing else does.",
+"parameters": {
+"type": "object",
+"properties": {
+"class": {
+"type": "string",
+"description": "Signal class, up to 23 chars; empty clears"
+},
+"age_s": {
+"type": "integer",
+"description": "Alert age in seconds at push time"
+}
+}
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "battery_read",
+"description": "Read battery voltage in volts (boards with a VBAT divider)",
+"parameters": {
+"type": "object",
+"properties": {}
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "lora_stats",
+"description": "RX-only LoRa listener stats: seconds since last mesh packet heard, packet/CRC counters, last header fields (boards with an SX1262)",
+"parameters": {
+"type": "object",
+"properties": {}
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "ble_stats",
+"description": "Passive BLE advertisement listener stats: seconds since last advert heard, advert/unique-device counters, last RSSI (boards with BLE built)",
+"parameters": {
+"type": "object",
+"properties": {}
+}
+}
+},
+{
+"type": "function",
+"function": {
+"name": "anomaly_stats",
+"description": "Edge anomaly witness: max |z| across self-learned telemetry baselines (heap/temp/RSSI/rx-rate), leading with the score; -1 while the baseline is still learning (anomaly builds)",
+"parameters": {
+"type": "object",
+"properties": {}
+}
+}
+}
+]
