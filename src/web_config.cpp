@@ -31,6 +31,7 @@ extern char cfg_system_prompt[4096];
 extern char cfg_timezone[64];
 extern char cfg_lora_tx_psk[96];
 extern char cfg_lora_tx_channel[40];
+extern char cfg_lora_watch_ids[96];
 extern int  cfg_telegram_cooldown;
 extern bool g_nats_enabled;
 extern bool g_nats_connected;
@@ -143,12 +144,13 @@ static void handleGetConfig() {
         "\"telegram_cooldown\":\"%d\","
         "\"timezone\":\"%s\","
         "\"lora_tx_psk\":\"%s\","
-        "\"lora_tx_channel\":\"%s\""
+        "\"lora_tx_channel\":\"%s\","
+        "\"lora_watch_ids\":\"%s\""
         "}",
         cfg_wifi_ssid, masked_pass, masked_key, cfg_model,
         cfg_device_name, cfg_api_base_url, cfg_nats_host, cfg_nats_port,
         masked_nats, masked_tg, cfg_telegram_chat_id, cfg_telegram_cooldown,
-        cfg_timezone, masked_lpsk, cfg_lora_tx_channel);
+        cfg_timezone, masked_lpsk, cfg_lora_tx_channel, cfg_lora_watch_ids);
 
     server.send(200, "application/json", buf);
 }
@@ -179,15 +181,21 @@ static void handlePostConfig() {
         const char *key;
         char val[128];
     };
-    static Field fields[15];
+    /* ⚠️ This handler writes a COMPLETE config, so a key missing from this list
+     * is DROPPED on every save — a writer silently discarding a field its reader
+     * needs. The count used to be hardcoded as 15/14 in four separate places, so
+     * adding a key meant updating all four or shipping either a lost field or
+     * malformed JSON. Derived from the array now: ONE constant, one place. */
     const char *keys[] = {
         "wifi_ssid", "wifi_pass", "api_key", "model", "device_name",
         "api_base_url", "nats_host", "nats_port", "nats_token",
         "telegram_token", "telegram_chat_id", "telegram_cooldown", "timezone",
-        "lora_tx_psk", "lora_tx_channel"
+        "lora_tx_psk", "lora_tx_channel", "lora_watch_ids"
     };
+    static const int NKEYS = (int)(sizeof(keys) / sizeof(keys[0]));
+    static Field fields[sizeof(keys) / sizeof(keys[0])];
 
-    for (int i = 0; i < 15; i++) {
+    for (int i = 0; i < NKEYS; i++) {
         fields[i].key = keys[i];
         fields[i].val[0] = '\0';
 
@@ -209,10 +217,10 @@ static void handlePostConfig() {
     }
 
     f.print("{\n");
-    for (int i = 0; i < 15; i++) {
+    for (int i = 0; i < NKEYS; i++) {
         f.print("  \""); f.print(fields[i].key); f.print("\": ");
         wcWriteJsonEscaped(f, fields[i].val);
-        if (i < 14) f.print(",");
+        if (i < NKEYS - 1) f.print(",");
         f.print("\n");
     }
     f.print("}\n");
@@ -698,6 +706,8 @@ nav button{padding:0.4rem 0.6rem;font-size:0.8rem}
 <div class="sep"></div>
 <label>LoRa TX Channel Name</label>
 <input type="text" id="c_lora_tx_channel" placeholder="LongFast">
+<label>LoRa watch ids (hex, comma-separated) — per-id last-heard, so a dead PA on your own gateway is visible</label>
+<input type="text" id="c_lora_watch_ids" placeholder="32962f10,ddfb8065">
 <label>LoRa TX Channel PSK</label>
 <input type="password" id="c_lora_tx_psk">
 <p class="hint">Channel name + 16/32-byte key (hex or base64) for mesh_send. Empty = public default channel.</p>
@@ -782,7 +792,7 @@ setTimeout(function(){t.className='toast'},2500);
 function loadConfig(){
 fetch('/api/config').then(r=>r.json()).then(d=>{
 var f=['wifi_ssid','wifi_pass','api_key','model','device_name','api_base_url',
-'nats_host','nats_port','nats_token','telegram_token','telegram_chat_id','telegram_cooldown','timezone','lora_tx_psk','lora_tx_channel'];
+'nats_host','nats_port','nats_token','telegram_token','telegram_chat_id','telegram_cooldown','timezone','lora_tx_psk','lora_tx_channel','lora_watch_ids'];
 f.forEach(k=>{var el=document.getElementById('c_'+k);if(el)el.value=d[k]||''});
 }).catch(e=>toast('Failed to load config',false));
 }

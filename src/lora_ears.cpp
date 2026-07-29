@@ -74,6 +74,45 @@ static uint32_t s_last_from = 0, s_last_to = 0;
 static uint8_t s_last_ch = 0;
 static float s_last_rssi = 0.0f, s_last_snr = 0.0f;
 
+/* WATCH LIST — per-id last-heard, so "is OUR transmitter on the air?" can be
+ * answered separately from "is the channel silent?". Bounded and static: this
+ * runs on a 237 kB-heap ESP32-S3, and an unbounded list would trade a real
+ * blind spot for a heap risk. */
+/* Sized to the DOMAIN, not to a round number: this fleet runs ~8 radios, so a
+ * cap of 6 would silently drop real members (the operator's "watch the ones
+ * that are part of the fleet"). 12 gives headroom at 16 bytes/entry = 192 B on a
+ * 237 kB heap — bounded, but not artificially tight. */
+#define LORA_WATCH_MAX 12
+static uint32_t      s_watch_id[LORA_WATCH_MAX];
+static unsigned long s_watch_last_ms[LORA_WATCH_MAX];
+static unsigned long s_watch_pkts[LORA_WATCH_MAX];
+static float         s_watch_rssi[LORA_WATCH_MAX];
+static int           s_watch_n = 0;
+static int           s_watch_dropped = 0;   /* ids past MAX — reported, not hidden */
+
+void loraEarsSetWatch(const char *csv) {
+    s_watch_n = 0;
+    s_watch_dropped = 0;
+    if (!csv || !*csv) return;
+    const char *p = csv;
+    while (*p) {
+        while (*p == ',' || *p == ' ' || *p == '!') p++;
+        if (!*p) break;
+        char tok[16]; int n = 0;
+        while (*p && *p != ',' && *p != ' ' && n < (int)sizeof(tok) - 1) tok[n++] = *p++;
+        tok[n] = '\0';
+        if (n == 0) continue;
+        unsigned long v = strtoul(tok, nullptr, 16);
+        if (v == 0UL) continue;                 /* unparseable -> skip, never 0 */
+        if (s_watch_n >= LORA_WATCH_MAX) { s_watch_dropped++; continue; }
+        s_watch_id[s_watch_n]      = (uint32_t)v;
+        s_watch_last_ms[s_watch_n] = 0UL;       /* 0 == NEVER heard, not "now" */
+        s_watch_pkts[s_watch_n]    = 0UL;
+        s_watch_rssi[s_watch_n]    = 0.0f;
+        s_watch_n++;
+    }
+}
+
 static void IRAM_ATTR onLoraDio1() { s_rx_flag = true; }
 
 #ifdef WIRECLAW_LORA_TX
@@ -491,11 +530,65 @@ void loraEarsTick() {
             s_last_ch = buf[13];
             s_last_rssi = s_radio->getRSSI();
             s_last_snr = s_radio->getSNR();
+            /* Watch list: attribute this packet to a tracked id, if any. */
+            for (int i = 0; i < s_watch_n; i++) {
+                if (s_watch_id[i] == s_last_from) {
+                    s_watch_last_ms[i] = s_last_heard_ms;
+                    s_watch_pkts[i]++;
+                    s_watch_rssi[i] = s_last_rssi;
+                    break;
+                }
+            }
         } else {
             s_runts++; /* heard energy, not a mesh packet — count separately */
         }
     }
     s_radio->startReceive();
+}
+
+
+/* Append " watch=<id>:<age>/<pkts>@<rssi>" per tracked id. A never-heard id
+ * reports "never" — NOT 0, which would read as "heard just now" and is exactly
+ * the degraded-value-overlapping-the-healthy-domain trap. Nothing is appended
+ * when the list is empty, so the host can tell "not configured" from
+ * "configured but silent" — two facts a single 0 would merge. */
+static void appendWatch(char *out, int out_len) {
+    if (s_watch_n <= 0 || out_len <= 1) return;
+    unsigned long now = millis();
+    int used = (int)strlen(out);
+    if (used >= out_len - 1) return;
+
+    /* ⚠️ snprintf returns what it WOULD have written, not what it did. Advancing
+     * `used` by that value on a truncating call pushes it past the buffer, and
+     * (out_len - used) then goes NEGATIVE — as a size_t that is enormous, and the
+     * next call writes off the end. So every advance is bound-checked before the
+     * next write. On truncation we stop with a still-valid NUL-terminated string
+     * rather than corrupting memory on a device whose job is to not crash. */
+    int n = snprintf(out + used, (size_t)(out_len - used), " watch=");
+    if (n < 0) return;
+    used += n;
+    if (used >= out_len - 1) return;
+
+    for (int i = 0; i < s_watch_n; i++) {
+        if (s_watch_last_ms[i] == 0UL) {
+            /* NEVER heard since radio start — reported as "never", never as 0,
+             * which downstream would read as "heard just now". */
+            n = snprintf(out + used, (size_t)(out_len - used), "%s!%08x:never",
+                         i ? "," : "", (unsigned)s_watch_id[i]);
+        } else {
+            n = snprintf(out + used, (size_t)(out_len - used),
+                         "%s!%08x:%lu/%lu@%.0f",
+                         i ? "," : "", (unsigned)s_watch_id[i],
+                         (now - s_watch_last_ms[i]) / 1000UL,
+                         s_watch_pkts[i], (double)s_watch_rssi[i]);
+        }
+        if (n < 0) return;
+        used += n;
+        if (used >= out_len - 1) return;
+    }
+    if (s_watch_dropped > 0)
+        snprintf(out + used, (size_t)(out_len - used), " watch_dropped=%d",
+                 s_watch_dropped);
 }
 
 void loraEarsStats(char *out, int out_len) {
@@ -512,6 +605,7 @@ void loraEarsStats(char *out, int out_len) {
                  "crc_err %lu, runts %lu, %.3f MHz)",
                  (now - s_started_ms) / 1000UL, s_crc_err, s_runts,
                  (double)WIRECLAW_LORA_FREQ_MHZ);
+        appendWatch(out, out_len);
         return;
     }
     snprintf(out, out_len,
@@ -520,6 +614,7 @@ void loraEarsStats(char *out, int out_len) {
              (now - s_last_heard_ms) / 1000UL, s_heard, s_crc_err, s_runts,
              (unsigned)s_last_from, (unsigned)s_last_to, (unsigned)s_last_ch,
              (double)s_last_rssi, (double)s_last_snr);
+    appendWatch(out, out_len);
 }
 
 unsigned long loraEarsHeardCount() { return s_heard; }

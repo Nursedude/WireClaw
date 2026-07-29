@@ -54,6 +54,7 @@ char cfg_system_prompt[4096];
 char cfg_timezone[64];
 char cfg_lora_tx_psk[96];
 char cfg_lora_tx_channel[40];
+char cfg_lora_watch_ids[96];   /* comma-separated hex node ids to track individually */
 int cfg_telegram_cooldown = 3;  /* seconds, 0 = disabled */
 
 /* Placeholder defaults - overridden by LittleFS config.json */
@@ -72,6 +73,7 @@ static void configDefaults() {
     strncpy(cfg_timezone, "UTC0", sizeof(cfg_timezone));
     cfg_lora_tx_psk[0] = '\0';
     cfg_lora_tx_channel[0] = '\0';
+    cfg_lora_watch_ids[0] = '\0';
     /* Honesty clause (W5.1, 2026-07-04): the 4B agent model was observed
      * substituting an allowed tool for a restricted one and narrating it
      * as the requested action ("I've set GPIO 5 high" while calling
@@ -196,6 +198,7 @@ static bool loadConfig() {
         jsonGetString(json_buf, "device_name", cfg_device_name, sizeof(cfg_device_name));
         jsonGetString(json_buf, "api_base_url", cfg_api_base_url, sizeof(cfg_api_base_url));
         jsonGetString(json_buf, "nats_host", cfg_nats_host, sizeof(cfg_nats_host));
+        jsonGetString(json_buf, "lora_watch_ids", cfg_lora_watch_ids, sizeof(cfg_lora_watch_ids));
         char port_buf[8];
         if (jsonGetString(json_buf, "nats_port", port_buf, sizeof(port_buf))) {
             cfg_nats_port = atoi(port_buf);
@@ -1675,6 +1678,13 @@ void setup() {
 
     /* RX-only LoRa listener (no-op on builds without WIRECLAW_LORA_SX1262) */
     loraEarsInit();
+    /* Watch list from config — per-id last-heard, so a dead PA on our OWN
+     * gateway is distinguishable from a quiet channel. Config-driven on
+     * purpose: hardcoding fleet ids in firmware is the identity-copied-into-a-
+     * place-that-cannot-follow-it defect that cost 6.5 h on 2026-07-29. */
+    loraEarsSetWatch(cfg_lora_watch_ids);
+    if (cfg_lora_watch_ids[0])
+        Serial.printf("LoRa watch ids: %s\n", cfg_lora_watch_ids);
 
     /* Edge anomaly witness (no-op without WIRECLAW_ANOMALY) — after the
      * listeners so its first samples see real surfaces. */

@@ -35,6 +35,23 @@ void loraEarsTick();
  *  heard yet: an honest lower bound, so "deaf forever" can still alarm). */
 void loraEarsStats(char *out, int out_len);
 
+/** Configure the WATCH LIST: node ids (hex, no leading '!') this listener
+ *  should track individually, as a comma-separated string straight from
+ *  config.json `lora_watch_ids`. Deliberately CONFIG-driven — hardcoding fleet
+ *  ids here would bake identity into firmware, the defect class that cost the
+ *  fleet a 6.5 h outage on 2026-07-29 (an address copied into a place that
+ *  could not follow it).
+ *
+ *  WHY THIS EXISTS: mesh_heard_age_s answers "is the channel silent?" — it
+ *  cannot answer "is OUR transmitter reaching the air?". With neighbours
+ *  chattering at 6-8 pkt/min, a dead PA on our own gateway leaves heard_age_s
+ *  at ~5 s and every silence check clean, which is exactly the blind spot the
+ *  ears were built to cover. Per-id ages close it.
+ *
+ *  Pass NULL/"" to disable. Ids beyond LORA_WATCH_MAX are dropped and SAID so
+ *  in the stats string rather than silently ignored. */
+void loraEarsSetWatch(const char *csv_hex_ids);
+
 /** Packets heard since radio start (0 when the radio never initialized). */
 unsigned long loraEarsHeardCount();
 
@@ -49,6 +66,7 @@ static inline void loraEarsInit() {}
 static inline bool loraEarsAvailable() { return false; }
 static inline void loraEarsTick() {}
 static inline void loraEarsStats(char *, int) {}
+static inline void loraEarsSetWatch(const char *) {}
 static inline unsigned long loraEarsHeardCount() { return 0; }
 static inline long loraEarsHeardAgeS() { return -1; }
 
