@@ -104,6 +104,7 @@ static const char *TOOLS_JSON = R"JSON([
 {"type":"function","function":{"name":"device_info","description":"Get heap, uptime, WiFi, chip info","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"file_read","description":"Read file from filesystem","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}},
 {"type":"function","function":{"name":"file_write","description":"Write file to filesystem","parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}}},
+{"type":"function","function":{"name":"config_set","description":"Set ONE non-secret config key (device_name, timezone, lora_watch_ids, lora_tx_channel, telegram_chat_id, telegram_cooldown, model, api_base_url). Secrets and connectivity keys are portal-only by design. Verifies by re-read; never echoes the document.","parameters":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"}},"required":["key","value"]}}},
 {"type":"function","function":{"name":"nats_publish","description":"Publish NATS message","parameters":{"type":"object","properties":{"subject":{"type":"string"},"payload":{"type":"string"}},"required":["subject","payload"]}}},
 {"type":"function","function":{"name":"temperature_read","description":"Read chip temperature (C)","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"device_register","description":"Register sensor/actuator","parameters":{"type":"object","properties":{"name":{"type":"string"},"type":{"type":"string","enum":["digital_in","analog_in","ntc_10k","ldr","nats_value","serial_text","digital_out","relay","pwm"],"description":"digital_in: GPIO digital read, analog_in: raw ADC reading, ntc_10k: NTC 10K thermistor (temp in C, set inverted=true if NTC is on the 3.3V side), ldr: light-dependent resistor (light level), nats_value: virtual sensor from NATS subject, serial_text: UART text input, digital_out: GPIO digital write, relay: relay on/off, pwm: PWM output"},"pin":{"type":"integer"},"unit":{"type":"string"},"inverted":{"type":"boolean"},"subject":{"type":"string","description":"NATS subject (for nats_value)"},"baud":{"type":"integer","description":"Baud rate for serial_text (default 9600)"}},"required":["name","type"]}}},
@@ -1485,6 +1486,160 @@ const char *toolsGetDefinitions() {
     return TOOLS_JSON;
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+ * config_set — set ONE non-secret config key, remotely.
+ *
+ * WHY, and why not file_write: tool_file_write hard-rejects /config.json to stop
+ * a remote caller clobbering the document that holds the WiFi credential. That
+ * guard is correct but BLUNT — it also blocks every harmless field, so setting
+ * something like lora_watch_ids required a human on the claw's own WiFi. This
+ * honours the guard's intent (never lose the credential, never replace the whole
+ * doc) while making non-secret config manageable over the trusted bus.
+ *
+ * TWO EXCLUSION CLASSES, both deliberate:
+ *   SECRETS        wifi_pass, api_key, nats_token, telegram_token, lora_tx_psk
+ *                  — a remote setter for these would turn the bus into a
+ *                    credential-injection path. Portal only.
+ *   STRANDING      wifi_ssid, nats_host, nats_port — getting any of these wrong
+ *                  costs the claw its bus and the only recovery is physical/USB.
+ *                  Not worth the convenience.
+ * Anything not on the allowlist is REFUSED BY NAME, so a typo'd or hopeful key
+ * gets an error rather than silently doing nothing.
+ *
+ * Not in AGENT_TOOL_ALLOWLIST, so the on-device LLM cannot call it — same
+ * boundary as file_read/file_write.
+ * ───────────────────────────────────────────────────────────────────── */
+static const char *const CONFIG_SETTABLE[] = {
+    "device_name", "timezone", "lora_watch_ids", "lora_tx_channel",
+    "telegram_chat_id", "telegram_cooldown", "model", "api_base_url", NULL,
+};
+
+static bool configKeySettable(const char *k) {
+    for (int i = 0; CONFIG_SETTABLE[i]; i++)
+        if (strcmp(k, CONFIG_SETTABLE[i]) == 0) return true;
+    return false;
+}
+
+/* Values are spliced into a flat JSON document as-is, so anything that could
+ * break the document or inject a key is refused rather than escaped. None of the
+ * settable fields (id lists, names, timezones) legitimately need these. */
+static bool configValueSafe(const char *v) {
+    for (const char *p = v; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x20 || c > 0x7e) return false;
+        if (c == '"' || c == '\\' || c == '{' || c == '}') return false;
+    }
+    return true;
+}
+
+static void tool_config_set(const char *args, char *result, int result_len) {
+    char key[48], val[160];
+    if (!jsonArgString(args, "key", key, sizeof(key))) {
+        snprintf(result, result_len, "Error: missing 'key' argument");
+        return;
+    }
+    if (!configKeySettable(key)) {
+        snprintf(result, result_len,
+                 "Error: '%s' is not remotely settable. Secrets (wifi_pass, "
+                 "api_key, nats_token, telegram_token, lora_tx_psk) and "
+                 "connectivity keys (wifi_ssid, nats_host, nats_port) are "
+                 "portal-only by design.", key);
+        return;
+    }
+    if (!jsonArgString(args, "value", val, sizeof(val))) {
+        snprintf(result, result_len, "Error: missing 'value' argument");
+        return;
+    }
+    if (!configValueSafe(val)) {
+        snprintf(result, result_len,
+                 "Error: value contains a character refused for splicing "
+                 "(control, non-ASCII, quote, backslash or brace)");
+        return;
+    }
+
+    static char buf[1400];
+    File f = LittleFS.open("/config.json", "r");
+    if (!f) { snprintf(result, result_len, "Error: config.json unreadable"); return; }
+    int len = f.readBytes(buf, sizeof(buf) - 1);
+    f.close();
+    if (len <= 0) { snprintf(result, result_len, "Error: config.json empty"); return; }
+    buf[len] = '\0';
+
+    /* REFUSE if the document does not carry wifi_ssid: writing a config without
+     * it strands the claw, and a short/torn read must never become a write. */
+    if (!strstr(buf, "\"wifi_ssid\"")) {
+        snprintf(result, result_len,
+                 "Error: config.json read lacks wifi_ssid (short or torn read) "
+                 "— refusing to write");
+        return;
+    }
+
+    static char out[1500];
+    char needle[56];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    char *at = strstr(buf, needle);
+    int w = 0;
+    if (at) {
+        /* Replace the existing value: copy up to the key, then re-emit it. */
+        char *colon = strchr(at, ':');
+        if (!colon) { snprintf(result, result_len, "Error: malformed config near '%s'", key); return; }
+        char *vs = colon + 1;
+        while (*vs == ' ' || *vs == '\t') vs++;
+        if (*vs != '"') { snprintf(result, result_len, "Error: '%s' is not a string field", key); return; }
+        char *ve = strchr(vs + 1, '"');
+        if (!ve) { snprintf(result, result_len, "Error: unterminated value for '%s'", key); return; }
+        int head = (int)(vs + 1 - buf);
+        if (head + (int)strlen(val) + (int)strlen(ve) + 2 >= (int)sizeof(out)) {
+            snprintf(result, result_len, "Error: result would exceed the config buffer");
+            return;
+        }
+        memcpy(out, buf, head); w = head;
+        w += snprintf(out + w, sizeof(out) - w, "%s", val);
+        w += snprintf(out + w, sizeof(out) - w, "%s", ve);
+    } else {
+        /* Insert before the closing brace. */
+        char *close = strrchr(buf, '}');
+        if (!close) { snprintf(result, result_len, "Error: malformed config (no closing brace)"); return; }
+        int head = (int)(close - buf);
+        while (head > 0 && (buf[head-1] == '\n' || buf[head-1] == ' ' || buf[head-1] == '\t')) head--;
+        if (head + (int)strlen(key) + (int)strlen(val) + 16 >= (int)sizeof(out)) {
+            snprintf(result, result_len, "Error: result would exceed the config buffer");
+            return;
+        }
+        memcpy(out, buf, head); w = head;
+        w += snprintf(out + w, sizeof(out) - w, ",\n  \"%s\": \"%s\"\n}", key, val);
+    }
+    out[w] = '\0';
+
+    File wf = LittleFS.open("/config.json", "w");
+    if (!wf) { snprintf(result, result_len, "Error: config.json not writable"); return; }
+    int wrote = wf.print(out);
+    wf.close();
+    if (wrote != w) {
+        snprintf(result, result_len,
+                 "Error: short write (%d of %d) — config may be truncated, "
+                 "reprovision via the portal", wrote, w);
+        return;
+    }
+
+    /* VERIFY by re-reading, never by trusting the write (calibrated_claims #7).
+     * The reply states the KEY and that the credential survived — it never
+     * echoes the document. */
+    File vf = LittleFS.open("/config.json", "r");
+    if (!vf) { snprintf(result, result_len, "Error: wrote but cannot re-read to verify"); return; }
+    int vlen = vf.readBytes(buf, sizeof(buf) - 1);
+    vf.close();
+    buf[vlen > 0 ? vlen : 0] = '\0';
+    bool has_wifi = strstr(buf, "\"wifi_ssid\"") != NULL;
+    char expect[220];
+    snprintf(expect, sizeof(expect), "\"%s\": \"%s\"", key, val);
+    bool has_val = strstr(buf, expect) != NULL;
+    snprintf(result, result_len,
+             "config_set %s: verified=%s wifi_ssid_intact=%s (reboot to apply)",
+             key, has_val ? "yes" : "NO", has_wifi ? "yes" : "NO");
+}
+
+
 #ifdef WIRECLAW_AGENT_TOOLS_RESTRICTED
 
 /* Tools the ON-DEVICE LLM agent may call: display/LED/read-only sensors
@@ -1589,6 +1744,8 @@ bool toolExecute(const char *name, const char *args_json,
         tool_file_read(args_json, result, result_len);
     } else if (strcmp(name, "file_write") == 0) {
         tool_file_write(args_json, result, result_len);
+    } else if (strcmp(name, "config_set") == 0) {
+        tool_config_set(args_json, result, result_len);
     } else if (strcmp(name, "nats_publish") == 0) {
         tool_nats_publish(args_json, result, result_len);
     } else if (strcmp(name, "temperature_read") == 0) {
