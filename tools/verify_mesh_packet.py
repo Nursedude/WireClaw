@@ -83,8 +83,9 @@ def decode_packet(pkt: bytes, psk: bytes):
 def main() -> int:
     ok = True
 
-    # 1. Channel hash for the public LongFast channel must be 0x08 (the hash
-    #    moc's journal logs as undecodable and the claw's ears heard).
+    # 1. Channel hash for the public LongFast channel must be 0x08 — confirmed
+    #    from two independent observations: a meshtasticd journal logging that
+    #    hash as undecodable, and the claw's own ears hearing it.
     h = channel_hash(b"LongFast", DEFAULT_PUBLIC_PSK)
     print(f"LongFast/public channel hash = 0x{h:02x} "
           f"({'OK' if h == 0x08 else 'WRONG'})")
