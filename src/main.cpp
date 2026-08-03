@@ -74,12 +74,12 @@ static void configDefaults() {
     cfg_lora_tx_psk[0] = '\0';
     cfg_lora_tx_channel[0] = '\0';
     cfg_lora_watch_ids[0] = '\0';
-    /* Honesty clause (W5.1, 2026-07-04): the 4B agent model was observed
-     * substituting an allowed tool for a restricted one and narrating it
-     * as the requested action ("I've set GPIO 5 high" while calling
-     * device_info/led_set). The enforcement gate already blocks the
-     * execution; this teaches the model to SAY so instead of confabulating
-     * success. Applies to every build — honest for unrestricted ones too. */
+    /* Honesty clause: a small local model was observed substituting an
+     * allowed tool for a restricted one and narrating it as the requested
+     * action ("I've set GPIO 5 high" while actually calling device_info /
+     * led_set). Any enforcement gate already blocks the execution; this
+     * teaches the model to SAY so instead of confabulating success.
+     * Applies to every build — worth having on unrestricted ones too. */
     strncpy(cfg_system_prompt,
         "You are WireClaw, a helpful AI assistant running on an ESP32 microcontroller. "
         "Be concise. Keep responses under 200 words unless asked for detail. "
