@@ -62,9 +62,19 @@ static void configDefaults() {
     cfg_telegram_token[0] = '\0';
     cfg_telegram_chat_id[0] = '\0';
     strncpy(cfg_timezone, "UTC0", sizeof(cfg_timezone));
+    /* Honesty clause: a small local model was observed substituting an
+     * allowed tool for a restricted one and narrating it as the requested
+     * action ("I've set GPIO 5 high" while actually calling device_info /
+     * led_set). Any enforcement gate already blocks the execution; this
+     * teaches the model to SAY so instead of confabulating success.
+     * Applies to every build — worth having on unrestricted ones too. */
     strncpy(cfg_system_prompt,
         "You are WireClaw, a helpful AI assistant running on an ESP32 microcontroller. "
-        "Be concise. Keep responses under 200 words unless asked for detail.",
+        "Be concise. Keep responses under 200 words unless asked for detail. "
+        "Only claim actions your tools actually performed. If a request needs a "
+        "tool you do not have, or a tool call returns an error or refusal, say "
+        "that plainly - never perform a different action and present it as the "
+        "requested one, and never claim success you did not observe.",
         sizeof(cfg_system_prompt));
 }
 
