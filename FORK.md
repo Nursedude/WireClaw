@@ -10,13 +10,25 @@ SHORT_TURBO vs agent). It answers "is this claw on the current source?" and
 cannot answer "is this claw on the right variant?" — for that, ask the device
 what it is doing (`lora_stats`, which reports what it actually hears).
 
-## Why a fork
+## What this fork is for
 
-The MeshForge dude-claw edge node is a **Heltec WiFi LoRa 32 V4** — it has a
-0.96" SSD1306 OLED and a white status LED that stock WireClaw (built for bare
-ESP32 devkits) leaves dark, and its NATS bus needs token auth. Both gaps are
-submitted upstream as PRs; the fork exists to run them **now**, and to carry
-any board-specific work that is out of scope for upstream.
+**`dudeclaw` is a MeshForge domain component — the edge tier of mini-dudeai.**
+The claws are the fleet's out-of-band senses: they hear RF the gateway cannot
+vouch for, witness boxes from off-box, and report to the mini brain over NATS.
+Firmware work here is *domain* work, driven by what the fleet needs to observe,
+and it is expected to diverge from upstream's purpose the way any managed
+component diverges from the library it was built on.
+
+Say that plainly because it sets the priorities: **the deploy branch serves the
+fleet first.** Upstream contribution is a courtesy we extend when a change
+happens to be general — not the reason the fork exists, and never a constraint
+on fleet work.
+
+The original hardware reasons still hold: the dude-claw node is a **Heltec WiFi
+LoRa 32 V4** with a 0.96" SSD1306 OLED and a white status LED that stock
+WireClaw (built for bare ESP32 devkits) leaves dark, and its NATS bus needs
+token auth. Those gaps are offered upstream as PRs; the fork exists to run them
+**now**, and to carry any board-specific work that is out of scope for upstream.
 
 ## Branch model (three lanes)
 
@@ -172,6 +184,30 @@ Per-PR state machine, checked whenever the claw is touched (no cron; solo dev):
   upstream releases by tag-merge into `main`, re-merge `pr/*` (rebasing them
   onto the new main), re-verify the guarded-optional property (stock envs build
   unchanged), canary the claw before calling it adopted.
+
+  ### ✅ LONG-LIVED reached — measured 2026-08-02, not waited for
+
+  Set from evidence rather than a calendar date, because the evidence was
+  already unambiguous:
+
+  | signal | measurement |
+  |---|---|
+  | upstream's last push to WireClaw | **2026-02-23** (~5.4 months) |
+  | PRs #15, #16 (ours) and #9 (another contributor) | **0 comments, 0 reviews** on all three |
+  | #9 open since | **2026-03-08** (~4.9 months) — not just us |
+  | externally-authored PRs ever merged | **zero** (#1–#8 were all the author's own branches) |
+  | repo state | not archived · 167 stars · 42 forks · issues enabled |
+
+  The author is **active on GitHub** (public activity 2026-07-25; other repos
+  pushed 07-08 → 07-19) — they moved on to other projects. Nothing is wrong
+  and nobody is at fault; this is simply a different mode, and planning around
+  a merge that is not coming would be the dishonest option.
+
+  **Consequence:** treat adopt-by-tag-merge as the model, and never defer a
+  fleet decision waiting on upstream. It changes nothing we run — only what we
+  plan around. PR **#17** (agent honesty clause) was still offered upstream on
+  the same day, as a marker and for the other 42 forks, with no expectation
+  attached.
 
   This state describes **our** planning posture, not anyone's responsiveness.
   Upstream is a volunteer MIT project under no obligation to review anything on
