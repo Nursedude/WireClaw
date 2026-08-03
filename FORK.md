@@ -16,7 +16,7 @@ The MeshForge dude-claw edge node is a **Heltec WiFi LoRa 32 V4** — it has a
 0.96" SSD1306 OLED and a white status LED that stock WireClaw (built for bare
 ESP32 devkits) leaves dark, and its NATS bus needs token auth. Both gaps are
 submitted upstream as PRs; the fork exists to run them **now**, and to carry
-any future board-specific work the upstream doesn't want.
+any board-specific work that is out of scope for upstream.
 
 ## Branch model (three lanes)
 
@@ -53,9 +53,9 @@ touch only files that exist because of this fork.
 Keeping a rule nobody follows is worse than having none: it made every commit
 here look like a violation, so the **three** that genuinely are (the drift row)
 were invisible among the **five** that are just how this fork works. And the
-"Why a fork" section above always said the fork exists *"to carry any future
-board-specific work the upstream doesn't want"* — the invariant simply left
-that work nowhere legal to live.
+"Why a fork" section above always said the fork exists *"to carry any
+board-specific work that is out of scope for upstream"* — the invariant simply
+left that work nowhere legal to live.
 
 ### The rule that actually applies
 
@@ -151,11 +151,18 @@ Per-PR state machine, checked whenever the claw is touched (no cron; solo dev):
 - **CHANGES REQUESTED** → fix on the `pr/*` branch (single source of truth),
   push, advance `dudeclaw`, bump `+dudeclaw.N`, reflash at the next natural
   claw touch.
-- **STALE (>90 days, no maintainer response)** → the fork becomes long-lived:
-  same governance as the fleet's RNS/LXMF forks — adopt upstream releases by
-  tag-merge into `main`, re-merge `pr/*` (rebasing them onto the new main),
-  re-verify the guarded-optional property (stock envs build unchanged), canary
-  the claw before calling it adopted.
+- **LONG-LIVED (still unreviewed after ~90 days)** → stop planning around
+  near-term convergence: same governance as the fleet's RNS/LXMF forks — adopt
+  upstream releases by tag-merge into `main`, re-merge `pr/*` (rebasing them
+  onto the new main), re-verify the guarded-optional property (stock envs build
+  unchanged), canary the claw before calling it adopted.
+
+  This state describes **our** planning posture, not anyone's responsiveness.
+  Upstream is a volunteer MIT project under no obligation to review anything on
+  our schedule; a PR sitting unreviewed is a normal outcome, not a failure, and
+  this file should never read as a complaint about it. The 90 days is just the
+  point where it is more honest to run the fork as long-lived than to keep
+  calling it temporary.
 
 Upstream adoption procedure (any state): `git fetch upstream && git merge
 <tag>` into `main`, rebase each open `pr/*`, run the advance recipe, re-run the
