@@ -172,14 +172,43 @@ static void tool_gpio_read(const char *args, char *result, int result_len) {
              value ? "HIGH" : "LOW");
 }
 
+/* Why a reboot happened. Free heap alone cannot distinguish "comfortable"
+ * from "repeatedly grazing zero", and nothing on this device recorded WHY it
+ * came back — so a reboot loop was indistinguishable from a quiet uptime
+ * reset. esp_reset_reason() survives everything except a power cycle, which
+ * is itself the answer. */
+static const char *resetReasonName() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:   return "poweron";
+        case ESP_RST_EXT:       return "ext-pin";
+        case ESP_RST_SW:        return "sw-restart";
+        case ESP_RST_PANIC:     return "PANIC";      /* crash / failed alloc */
+        case ESP_RST_INT_WDT:   return "INT-WDT";    /* interrupt wdt: hang */
+        case ESP_RST_TASK_WDT:  return "TASK-WDT";   /* task starved */
+        case ESP_RST_WDT:       return "WDT";
+        case ESP_RST_DEEPSLEEP: return "deepsleep";
+        case ESP_RST_BROWNOUT:  return "BROWNOUT";   /* power/supply */
+        case ESP_RST_SDIO:      return "sdio";
+        default:                return "unknown";
+    }
+}
+
 static void tool_device_info(const char *args, char *result, int result_len) {
     (void)args;
+    /* min_free = low-water mark since boot; max_alloc = largest single block
+     * still obtainable. A healthy-looking free heap with a small max_alloc is
+     * fragmentation, and fails allocations that "should" fit — reporting only
+     * the total is what let this device look fine while requests timed out. */
     snprintf(result, result_len,
         "Free heap: %u bytes, Total heap: %u bytes, "
+        "Min free heap: %u bytes, Max alloc block: %u bytes, "
+        "Reset reason: %s, "
         "Uptime: %lu seconds, "
         "WiFi: %s (rssi %d dBm), IP: %s, "
         "Chip: %s rev %d, %d cores, %lu MHz",
         ESP.getFreeHeap(), ESP.getHeapSize(),
+        ESP.getMinFreeHeap(), ESP.getMaxAllocHeap(),
+        resetReasonName(),
         millis() / 1000,
         WiFi.status() == WL_CONNECTED ? "connected" : "disconnected",
         (int)WiFi.RSSI(),

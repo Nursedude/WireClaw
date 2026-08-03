@@ -27,11 +27,39 @@ extern temperature_sensor_handle_t g_temp_sensor;
 #ifndef WIRECLAW_ANOMALY_SAMPLE_MS
 #define WIRECLAW_ANOMALY_SAMPLE_MS 60000UL
 #endif
-/* Samples before a feature's z-score participates (~1 h at 1/min). */
-#ifndef WIRECLAW_ANOMALY_WARMUP
-#define WIRECLAW_ANOMALY_WARMUP 60
+/* Estimator time constant, in samples — the ONE constant both the smoothing
+ * rate and the warm-up gate derive from. At 1 sample/min, 1440 = ~1 day. */
+#ifndef WIRECLAW_ANOMALY_TAU
+#define WIRECLAW_ANOMALY_TAU 1440
 #endif
-#define ANOMALY_ALPHA (1.0f / 1440.0f)
+
+/* Samples before a feature's z-score participates.
+ *
+ * MUST be >= TAU. This was 60 (~1 h) while TAU was 1440 (~1 day) — a 24x gap
+ * that made every score in between a measurement artifact rather than a
+ * reading. `var` needs ~one time constant to converge; below that it still
+ * reflects whatever narrow window the device has seen since boot, so sqrtf(var)
+ * sits at (or under) the per-feature FLOOR and z degenerates into
+ * "|x - mean| / FLOOR" — for temp_c, a bare "is it 2 C from baseline" trip
+ * wire. Every false page observed on dudeclaw-01 (n = 75, 204, 215, 476, 486,
+ * 557, 598 — all << 1440) landed in that window, and each one "cleared" on its
+ * own minutes later purely because var absorbed the excursion while the device
+ * state never changed.
+ *
+ * n resets to 0 on every reboot, so a flapping device re-enters the window
+ * each time it comes back — which is precisely when its telemetry is least
+ * trustworthy and the operator is most likely to be paged. */
+#ifndef WIRECLAW_ANOMALY_WARMUP
+#define WIRECLAW_ANOMALY_WARMUP WIRECLAW_ANOMALY_TAU
+#endif
+
+#if WIRECLAW_ANOMALY_WARMUP < WIRECLAW_ANOMALY_TAU
+#error "ANOMALY_WARMUP < ANOMALY_TAU: scoring before the variance estimator \
+has converged yields z against a floor-pinned sd, not against the device's \
+real variability. Raise WARMUP (or lower TAU) so they cannot drift apart."
+#endif
+
+#define ANOMALY_ALPHA (1.0f / (float)WIRECLAW_ANOMALY_TAU)
 
 typedef struct {
     const char *name;
