@@ -35,9 +35,9 @@ divergence trap is back — don't."*
 
 **It was aspirational, not descriptive, and the gap was never small.** Measured
 2026-08-02 (`git rev-list main..dudeclaw --no-merges`, then checking each sha
-against every `pr/*` branch): of 27 non-merge commits ahead of `main`, **10 are
-dudeclaw-only, and only 2 of those are pure version-marker residue.** The other
-8 are real code that had been accumulating for months:
+against every `pr/*` branch): of 27 non-merge commits ahead of `main`, **10 were
+dudeclaw-only, and only 2 of those were pure version-marker residue.** The other
+8 were real code that had been accumulating for months:
 
 | Kind | Commits | Why it is not on a `pr/*` branch |
 |---|---|---|
@@ -73,9 +73,15 @@ that work nowhere legal to live.
 **What this costs, stated plainly:** `dudeclaw` is **no longer reproducible**
 from `main` + `pr/*` alone. It is **advanced, never recreated** — see the
 advance recipe below. The old recipe's `git checkout -B dudeclaw main` would have
-silently destroyed all 10 fork-only commits, including the SHORT_TURBO env
+silently destroyed every fork-only commit, including the SHORT_TURBO env
 whose loss would put a reflashed ST claw back on LongFast, deaf on the one
 segment it exists to hear.
+
+⚠️ **Those counts are a dated snapshot, not an invariant** — the fork-only set
+GROWS (it was 10 on the morning of 2026-08-02 and 12 by that evening, since
+documentation commits are themselves fork-only). Never quote the number from
+this file; **run the audit below**, which is the live answer. The per-commit
+table above stays useful because shas do not drift.
 
 **Compensating guard** — the reproducibility guarantee is gone, so the
 auditability has to be explicit. This enumerates every commit that exists only
@@ -97,7 +103,7 @@ that build. From `+dudeclaw.2` on, the deploy branch uses the PR-shaped
 
 ⚠️ **`dudeclaw` is advanced by merging, never recreated.** The previous recipe
 opened with `git checkout -B dudeclaw main`, which discards everything the
-branch carries that `main` does not — all 10 fork-only commits. Do not
+branch carries that `main` does not — every fork-only commit. Do not
 reintroduce it.
 
 ```bash
@@ -111,9 +117,9 @@ git checkout dudeclaw
 # 3. advance the deploy branch — merge, never -B
 git merge --no-edit main
 #    then re-merge only the pr/* branches that have actually moved, ONE AT A
-#    TIME (an octopus merge of all 10 dies on the first conflict with no
-#    indication of which branch caused it). As of 2026-08-02 all 10 are already
-#    contained, so this loop is a no-op until a pr/* gains a fix.
+#    TIME (an octopus merge of all of them dies on the first conflict with no
+#    indication of which branch caused it). This loop is a no-op whenever every
+#    pr/* is already contained — it does real work only after one gains a fix.
 for b in $(git branch --no-merged dudeclaw --list 'pr/*' --format='%(refname:short)'); do
   git merge --no-edit "$b" || { echo "CONFLICT merging $b — resolve, then re-run"; break; }
 done
