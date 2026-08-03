@@ -23,7 +23,7 @@ any board-specific work that is out of scope for upstream.
 | Branch | Role | Rule |
 |--------|------|------|
 | `main` | mirror of upstream main | never commit here; advance only by fetching upstream |
-| `pr/*` (10 branches) | upstream-bound feature work | feature code lives HERE — and **fixes to it live here too, never on `dudeclaw`** |
+| `pr/*` (`git branch --list 'pr/*'`) | upstream-bound feature work | feature code lives HERE — and **fixes to it live here too, never on `dudeclaw`** |
 | `dudeclaw` | deployed firmware | `main` + a merge of each open `pr/*` + **fork-only commits that live here and nowhere else** |
 
 ### ⚠️ The old invariant was retired 2026-08-02 — it never described reality
@@ -44,11 +44,27 @@ dudeclaw-only, and only 2 of those were pure version-marker residue.** The other
 | fleet-specific features | `dc27b28` LoRa watch list · `98cdab3` `config_set` | encode this fleet's operating model; upstream has no use for them |
 | board/profile build config | `eac93a3` BLE retired from the V4 profile · `0f5a22e` SHORT_TURBO env | tuning for specific deployed hardware, not a general feature |
 | off-device tooling | `b9da37d` `tools/prompt_eval.py` | not firmware at all |
-| **drift — should have gone on a `pr/*`** | `540969f` anomaly warm-up fix (`src/anomaly.cpp`, owner `pr/anomaly-witness`) · `89311b6` agent FS charter (`data_agent/`, owner `pr/agent-profile`) · `ff5441b` agent honesty clause (`src/main.cpp`, upstream-owned) | edits to code another branch owns, committed on the deploy branch. Known debt. |
+| ~~drift — should have gone on a `pr/*`~~ **REPAID 2026-08-02** | `540969f` anomaly warm-up fix → `pr/anomaly-witness` · `89311b6` agent FS charter → `pr/agent-profile` · `ff5441b` agent honesty clause → new `pr/agent-honesty` | edits to code another branch owns, once committed only on the deploy branch. Now carried by their owners as well. |
 
-The last row is a judgment call, not a mechanical result: it is where a commit
+The last row was a judgment call, not a mechanical result: it is where a commit
 touched a file owned by a `pr/*` branch or by upstream `main`. The other rows
 touch only files that exist because of this fork.
+
+**Why repaying it mattered, since nothing on hardware changed:** those two
+`pr/*` branches were carrying *defective versions of the features they exist to
+propose*. `pr/anomaly-witness` had the warm-up that scores before the variance
+estimate converges — where `fabsf()` makes cooling alarm exactly like
+overheating — and `pr/agent-profile` had the agent env with no `data_agent/`,
+so it would build against a prompt advertising tools that build refuses.
+Submitting either would have offered upstream a known-broken feature while the
+fix sat on the deploy branch. The honesty clause went to its **own** branch
+rather than into `pr/agent-profile`: it is not agent-specific (it stops any
+build claiming actions it did not perform), and burying a general improvement
+inside a profile PR hides it.
+
+The deploy branch keeps its own copies — those shas are still fork-only, and
+the audit still lists them. Repayment means the owner branch now carries the
+content too, not that history was rewritten.
 
 Keeping a rule nobody follows is worse than having none: it made every commit
 here look like a violation, so the **three** that genuinely are (the drift row)
