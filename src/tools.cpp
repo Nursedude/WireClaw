@@ -4,6 +4,7 @@
  */
 
 #include "tools.h"
+#include "version.h"
 #include "llm_client.h"
 #include "devices.h"
 #include "nats_hal.h"
@@ -206,13 +207,22 @@ static void tool_device_info(const char *args, char *result, int result_len) {
      * still obtainable. A healthy-looking free heap with a small max_alloc is
      * fragmentation, and fails allocations that "should" fit — reporting only
      * the total is what let this device look fine while requests timed out. */
+    /* Version leads DELIBERATELY. snprintf truncates the TAIL, and this is the
+     * field an OTA push must read back to know which image is running — you
+     * cannot verify an update you cannot interrogate. It was previously
+     * announced only in the boot "online" event and the capabilities payload,
+     * so a caller could overhear it at boot but never ASK for it. Leading also
+     * costs nothing to existing readers: the fleet-side parser anchors every
+     * field on "(?:^|,)\s*", so each one still matches after a comma. */
     snprintf(result, result_len,
+        "Version: %s, "
         "Free heap: %u bytes, Total heap: %u bytes, "
         "Min free heap: %u bytes, Max alloc block: %u bytes, "
         "Reset reason: %s, "
         "Uptime: %lu seconds, "
         "WiFi: %s (rssi %d dBm), IP: %s, "
         "Chip: %s rev %d, %d cores, %lu MHz",
+        WIRECLAW_VERSION,
         ESP.getFreeHeap(), ESP.getHeapSize(),
         ESP.getMinFreeHeap(), ESP.getMaxAllocHeap(),
         resetReasonName(),
