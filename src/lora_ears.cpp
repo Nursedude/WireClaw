@@ -71,6 +71,7 @@ static unsigned long s_crc_err = 0;
 static unsigned long s_runts = 0;
 static unsigned long s_last_heard_ms = 0;
 static uint32_t s_last_from = 0, s_last_to = 0;
+static int      s_last_hops = -1;   /* -1 == unknown/malformed, never "direct" */
 static uint8_t s_last_ch = 0;
 static float s_last_rssi = 0.0f, s_last_snr = 0.0f;
 
@@ -87,6 +88,15 @@ static uint32_t      s_watch_id[LORA_WATCH_MAX];
 static unsigned long s_watch_last_ms[LORA_WATCH_MAX];
 static unsigned long s_watch_pkts[LORA_WATCH_MAX];
 static float         s_watch_rssi[LORA_WATCH_MAX];
+/* DIRECT reception, tracked separately from any-path reception (2026-08-30).
+ * `watch=` answers "traffic bearing this id reached me" — in a flood mesh that
+ * may be a NEARER node rebroadcasting, so its RSSI is that relay's signal, not
+ * this node's. For siting a digipeater the only useful question is "do I have
+ * a DIRECT link to this node, and how good is it", and the two were
+ * indistinguishable until now. hops == 0 means the originator's own
+ * transmission. */
+static unsigned long s_watch_direct_ms[LORA_WATCH_MAX];
+static float         s_watch_direct_rssi[LORA_WATCH_MAX];
 static int           s_watch_n = 0;
 static int           s_watch_dropped = 0;   /* ids past MAX — reported, not hidden */
 
@@ -109,6 +119,8 @@ void loraEarsSetWatch(const char *csv) {
         s_watch_last_ms[s_watch_n] = 0UL;       /* 0 == NEVER heard, not "now" */
         s_watch_pkts[s_watch_n]    = 0UL;
         s_watch_rssi[s_watch_n]    = 0.0f;
+        s_watch_direct_ms[s_watch_n]   = 0UL;   /* 0 == never heard DIRECT */
+        s_watch_direct_rssi[s_watch_n] = 0.0f;
         s_watch_n++;
     }
 }
@@ -530,12 +542,32 @@ void loraEarsTick() {
             s_last_ch = buf[13];
             s_last_rssi = s_radio->getRSSI();
             s_last_snr = s_radio->getSNR();
+            /* flags byte: low 3 bits = hop_limit REMAINING, high 3 bits =
+             * hop_start ORIGINAL — the same layout this file's own TX path
+             * writes at pkt[12], and confirmed against a captured live packet
+             * (moc logged flags=0x62 for one it reported hop_start:3
+             * hops_away:1; 0x62 -> limit 2, start 3, 3-2 = 1).
+             * hops == 0 therefore means the ORIGINATOR's own transmission
+             * reached this radio: a direct link, not a rebroadcast. */
+            uint8_t flags = buf[12];
+            int hop_limit = flags & 0x07;
+            int hop_start = (flags >> 5) & 0x07;
+            /* A relay decrements hop_limit, so start >= limit. If the wire says
+             * otherwise the header is malformed or from a foreign stack: treat
+             * it as UNKNOWN hop distance, never as direct — claiming a direct
+             * link we cannot substantiate is the failure that matters here. */
+            int hops = (hop_start >= hop_limit) ? (hop_start - hop_limit) : -1;
+            s_last_hops = hops;
             /* Watch list: attribute this packet to a tracked id, if any. */
             for (int i = 0; i < s_watch_n; i++) {
                 if (s_watch_id[i] == s_last_from) {
                     s_watch_last_ms[i] = s_last_heard_ms;
                     s_watch_pkts[i]++;
                     s_watch_rssi[i] = s_last_rssi;
+                    if (hops == 0) {
+                        s_watch_direct_ms[i]   = s_last_heard_ms;
+                        s_watch_direct_rssi[i] = s_last_rssi;
+                    }
                     break;
                 }
             }
@@ -586,6 +618,36 @@ static void appendWatch(char *out, int out_len) {
         used += n;
         if (used >= out_len - 1) return;
     }
+    /* DIRECT-only view, emitted as its OWN field rather than folded into the
+     * watch token above. Two reasons: the host-side parser for `watch=` is
+     * shipped and would break on a changed token shape (reader/writer pairs
+     * wire together or fail together), and the two facts answer different
+     * questions — `watch=` is "traffic bearing this id reached me by ANY
+     * path", `direct=` is "the originator's own transmission reached me".
+     * A node can be watch-heard at a strong RSSI and direct-never: that is a
+     * NEARER node rebroadcasting it, and reading the first as a link budget
+     * is how you site a digipeater in the wrong place. */
+    if (used < out_len - 1) {
+        n = snprintf(out + used, (size_t)(out_len - used), " direct=");
+        if (n < 0) return;
+        used += n;
+        if (used >= out_len - 1) return;
+        for (int i = 0; i < s_watch_n; i++) {
+            if (s_watch_direct_ms[i] == 0UL) {
+                n = snprintf(out + used, (size_t)(out_len - used), "%s!%08x:never",
+                             i ? "," : "", (unsigned)s_watch_id[i]);
+            } else {
+                n = snprintf(out + used, (size_t)(out_len - used),
+                             "%s!%08x:%lu@%.0f",
+                             i ? "," : "", (unsigned)s_watch_id[i],
+                             (now - s_watch_direct_ms[i]) / 1000UL,
+                             (double)s_watch_direct_rssi[i]);
+            }
+            if (n < 0) return;
+            used += n;
+            if (used >= out_len - 1) return;
+        }
+    }
     if (s_watch_dropped > 0)
         snprintf(out + used, (size_t)(out_len - used), " watch_dropped=%d",
                  s_watch_dropped);
@@ -610,10 +672,10 @@ void loraEarsStats(char *out, int out_len) {
     }
     snprintf(out, out_len,
              "mesh_heard_age_s: %lu (heard %lu pkts, crc_err %lu, runts %lu, "
-             "last from=!%08x to=!%08x ch=0x%02x rssi=%.0f snr=%.1f)",
+             "last from=!%08x to=!%08x ch=0x%02x rssi=%.0f snr=%.1f hops=%d)",
              (now - s_last_heard_ms) / 1000UL, s_heard, s_crc_err, s_runts,
              (unsigned)s_last_from, (unsigned)s_last_to, (unsigned)s_last_ch,
-             (double)s_last_rssi, (double)s_last_snr);
+             (double)s_last_rssi, (double)s_last_snr, s_last_hops);
     appendWatch(out, out_len);
 }
 
