@@ -127,6 +127,7 @@ static const char *TOOLS_JSON = R"JSON([
 {"type":"function","function":{"name":"mesh_set_channel","description":"Set the LoRa TX channel name and PSK at runtime (RAM only; the key never lands in flash). Returns the resulting channel hash.","parameters":{"type":"object","properties":{"name":{"type":"string","description":"Channel name"},"psk":{"type":"string","description":"16/32-byte key, hex or base64; empty = public default"}},"required":["name"]}}},
 {"type":"function","function":{"name":"ble_stats","description":"Passive BLE advertisement listener stats: seconds since last advert heard, advert/unique-device counters, last RSSI (boards with BLE built)","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"anomaly_stats","description":"Edge anomaly witness: max |z| across self-learned telemetry baselines (heap/temp/RSSI/rx-rate), leading with the score; -1 while the baseline is still learning (anomaly builds)","parameters":{"type":"object","properties":{}}}},
+{"type":"function","function":{"name":"reboot","description":"Restart this device so a config_set change takes effect, without a human at the board. Refuses if the live config is unreadable or its wifi_ssid is missing/empty. Verify it landed with device_info reset_reason=sw-restart and a small uptime — never from this reply.","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"host_probe","description":"Out-of-band TCP liveness probe of another host on the LAN. Distinguishes a wedged-userspace freeze (IP stack answers but the app port serves nothing) from an unreachable host/path. Pass a numeric IPv4. Returns ip_alive/app_open/banner/kstack/rtt_ms.","parameters":{"type":"object","properties":{"host":{"type":"string","description":"Target IPv4 (numeric, e.g. 10.0.0.5)"},"app_port":{"type":"integer","description":"App port that emits a banner on connect, e.g. 22 (sshd). Default 22"},"closed_port":{"type":"integer","description":"A normally-closed port, for a kernel-alive RST check. Default 9"},"timeout_ms":{"type":"integer","description":"Per-connect timeout 100-3000. Default 1200"}},"required":["host"]}}},
 {"type":"function","function":{"name":"chain_create","description":"Create multi-step automation chain (up to 5 steps) in one call. Steps execute in order with delays.","parameters":{"type":"object","properties":{"sensor_name":{"type":"string","description":"Sensor to monitor"},"condition":{"type":"string","description":"gt|lt|eq|neq|change|always"},"threshold":{"type":"integer"},"interval_seconds":{"type":"integer"},"step1_action":{"type":"string","description":"telegram|led_set|gpio_write|nats_publish|actuator|serial_send"},"step1_message":{"type":"string","description":"For telegram/nats/serial_send"},"step1_r":{"type":"integer"},"step1_g":{"type":"integer"},"step1_b":{"type":"integer"},"step1_pin":{"type":"integer"},"step1_value":{"type":"integer"},"step1_actuator":{"type":"string"},"step1_nats_subject":{"type":"string"},"step2_action":{"type":"string","description":"Action after step1"},"step2_delay":{"type":"integer","description":"Seconds before step2"},"step2_message":{"type":"string"},"step2_r":{"type":"integer"},"step2_g":{"type":"integer"},"step2_b":{"type":"integer"},"step2_pin":{"type":"integer"},"step2_value":{"type":"integer"},"step2_actuator":{"type":"string"},"step2_nats_subject":{"type":"string"},"step3_action":{"type":"string","description":"Step3 (optional)"},"step3_delay":{"type":"integer","description":"Seconds before step3"},"step3_message":{"type":"string"},"step3_r":{"type":"integer"},"step3_g":{"type":"integer"},"step3_b":{"type":"integer"},"step3_pin":{"type":"integer"},"step3_value":{"type":"integer"},"step3_actuator":{"type":"string"},"step3_nats_subject":{"type":"string"},"step4_action":{"type":"string","description":"Step4 (optional)"},"step4_delay":{"type":"integer","description":"Seconds before step4"},"step4_message":{"type":"string"},"step4_r":{"type":"integer"},"step4_g":{"type":"integer"},"step4_b":{"type":"integer"},"step4_pin":{"type":"integer"},"step4_value":{"type":"integer"},"step4_actuator":{"type":"string"},"step4_nats_subject":{"type":"string"},"step5_action":{"type":"string","description":"Step5 (optional)"},"step5_delay":{"type":"integer","description":"Seconds before step5"},"step5_message":{"type":"string"},"step5_r":{"type":"integer"},"step5_g":{"type":"integer"},"step5_b":{"type":"integer"},"step5_pin":{"type":"integer"},"step5_value":{"type":"integer"},"step5_actuator":{"type":"string"},"step5_nats_subject":{"type":"string"}},"required":["sensor_name","condition","threshold","step1_action","step2_action"]}}}
 ])JSON";
@@ -1532,6 +1533,89 @@ static bool configValueSafe(const char *v) {
     return true;
 }
 
+/* reboot — restart the claw over the bus, so applying a config change does not
+ * require a human at the board.
+ *
+ * WHY (2026-08-30): every config_set reply ends "(reboot to apply)", and the
+ * setup portal lives on the claw's OWN /28, which no fleet box can route to —
+ * so "apply" has meant walking to the device. dudeclaw-01 is in another
+ * building; a five-character watch-list change cost a trip across a property.
+ *
+ * This adds NO new restart path. It arms the SAME deferred reboot the portal
+ * (web_config.cpp) and the Telegram command already use, so the NATS reply
+ * flushes before the board goes down — without the deferral the caller cannot
+ * tell "rebooting" from "dark".
+ *
+ * VERIFICATION IS THE CALLER'S, and it is NOT this reply: the next capture must
+ * show reset_reason "sw-restart" with a small uptime. A tool that reports its
+ * own success is not evidence (calibrated_claims #7).
+ *
+ * REFUSES RATHER THAN STRANDS. A reboot into a config that cannot rejoin WiFi
+ * is recoverable only with physical/USB access — the exact cost this tool
+ * exists to remove — so we restart only with the live config readable AND
+ * carrying a NON-EMPTY wifi_ssid. Unreadable is UNKNOWN, never assumed good.
+ *
+ * ⚠️ There is NOT YET a rollback-on-failure-to-join. Until that lands a remote
+ * reboot moves the recovery cost from "walk over" to "walk over with a USB
+ * cable" when the config is wrong, so the refusals above are the load-bearing
+ * part of this tool, not a formality. The rollback must NOT be built as a bare
+ * join timeout — see .claude/plans/dudeclaw_remote_reboot_2026_08_30.md in the
+ * MeshForge repo: without a probation flag it cannot tell a bad config from a
+ * router outage, and every claw would roll back together.
+ *
+ * NOT agent-callable by design — see AGENT_TOOL_ALLOWLIST's rationale block.
+ */
+static void tool_reboot(const char *args, char *result, int result_len) {
+    (void)args;
+
+    static char buf[1400];
+    File f = LittleFS.open("/config.json", "r");
+    if (!f) {
+        snprintf(result, result_len,
+                 "Error: config.json unreadable — refusing to reboot into a "
+                 "config this device cannot vouch for");
+        return;
+    }
+    int len = f.readBytes(buf, sizeof(buf) - 1);
+    f.close();
+    if (len <= 0) {
+        snprintf(result, result_len,
+                 "Error: config.json empty — refusing to reboot");
+        return;
+    }
+    buf[len] = '\0';
+
+    /* wifi_ssid must be PRESENT and NON-EMPTY. Presence alone would pass a torn
+     * read that happens to include the key with an empty value, and a claw that
+     * boots without an SSID never returns to the bus. */
+    const char *k = strstr(buf, "\"wifi_ssid\"");
+    if (!k) {
+        snprintf(result, result_len,
+                 "Error: config.json lacks wifi_ssid (short or torn read) — "
+                 "refusing to reboot");
+        return;
+    }
+    const char *colon = strchr(k, ':');
+    const char *vs = colon ? colon + 1 : NULL;
+    while (vs && (*vs == ' ' || *vs == '\t')) vs++;
+    if (!vs || *vs != '"' || vs[1] == '"') {
+        snprintf(result, result_len,
+                 "Error: wifi_ssid is empty or malformed — rebooting would "
+                 "strand this claw off the bus; refusing");
+        return;
+    }
+
+    extern bool          g_reboot_pending;
+    extern unsigned long g_reboot_at;
+    g_reboot_pending = true;
+    g_reboot_at = millis() + 2000; /* 2s: enough for the NATS reply to flush */
+
+    Serial.printf("[Reboot] armed over bus (wifi_ssid intact)\n");
+    snprintf(result, result_len,
+             "reboot armed in 2000ms: wifi_ssid_intact=yes — confirm with "
+             "device_info reset_reason=sw-restart and a small uptime");
+}
+
 static void tool_config_set(const char *args, char *result, int result_len) {
     char key[48], val[160];
     if (!jsonArgString(args, "key", key, sizeof(key))) {
@@ -1657,6 +1741,10 @@ static void tool_config_set(const char *args, char *result, int result_len) {
  *   host_probe                   LAN probing under LLM control
  *   display_tier                 evidence-based claim owned by the brain's
  *                                pusher (same exclusion as mini's allowlist)
+ *   reboot                       takes the device off the bus; an off-site
+ *                                claw that does not come back is a building
+ *                                trip. Operator action over the bus, never a
+ *                                4B model's judgement call.
  */
 static const char *AGENT_TOOL_ALLOWLIST[] = {
     "led_set", "display_print", "display_alert", "temperature_read",
@@ -1796,6 +1884,8 @@ bool toolExecute(const char *name, const char *args_json,
         tool_chain_create(args_json, result, result_len);
     } else if (strcmp(name, "host_probe") == 0) {
         tool_host_probe(args_json, result, result_len);
+    } else if (strcmp(name, "reboot") == 0) {
+        tool_reboot(args_json, result, result_len);
     } else {
         snprintf(result, result_len, "Error: unknown tool '%s'", name);
         return false;
