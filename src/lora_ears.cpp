@@ -555,8 +555,19 @@ void loraEarsTick() {
             /* A relay decrements hop_limit, so start >= limit. If the wire says
              * otherwise the header is malformed or from a foreign stack: treat
              * it as UNKNOWN hop distance, never as direct — claiming a direct
-             * link we cannot substantiate is the failure that matters here. */
-            int hops = (hop_start >= hop_limit) ? (hop_start - hop_limit) : -1;
+             * link we cannot substantiate is the failure that matters here.
+             *
+             * F2 (2026-08-30 pass, operator-ratified 2026-08-31): hop_start
+             * itself must be > 0. An originator that never sets hop_start
+             * (Meshtastic < 2.3) relayed down to hop_limit 0 arrives as
+             * flags=0x00 — (0,0) — which the old arithmetic scored as hops=0,
+             * i.e. the RELAY's RSSI recorded as a DIRECT link. That is exactly
+             * the wrong-siting failure hop-awareness exists to prevent, so
+             * (0,0) is UNKNOWN. Only (0,0) changes: (3,2)->1 and (3,3)->0 are
+             * untouched. Accepted trade: a deliberate hop_limit-0 transmission
+             * loses direct credit until any normal packet re-earns it. */
+            int hops = (hop_start > 0 && hop_start >= hop_limit)
+                           ? (hop_start - hop_limit) : -1;
             s_last_hops = hops;
             /* Watch list: attribute this packet to a tracked id, if any. */
             for (int i = 0; i < s_watch_n; i++) {
@@ -584,40 +595,71 @@ void loraEarsTick() {
  * the degraded-value-overlapping-the-healthy-domain trap. Nothing is appended
  * when the list is empty, so the host can tell "not configured" from
  * "configured but silent" — two facts a single 0 would merge. */
+/* Reserve for the truncation witness ` cut=1` (6 chars + NUL + slack). */
+static const int WATCH_CUT_RESERVE = 8;
+
+/* Write the truncation witness into the reserved tail. `used` is clamped to
+ * `lim` so the marker always fits: out_len - lim == WATCH_CUT_RESERVE, which
+ * exceeds the marker's length. Clamping can overwrite a partial token — that
+ * is correct, not collateral: the host flags every token in a cut=1 reply
+ * rather than trusting it, so a half-token carries no meaning worth keeping. */
+static void appendWatchCut(char *out, int used, int out_len, int lim) {
+    if (used > lim) used = lim;
+    if (used < 0 || used >= out_len) return;   /* nowhere sane to write */
+    snprintf(out + used, (size_t)(out_len - used), " cut=1");
+}
+
 static void appendWatch(char *out, int out_len) {
     if (s_watch_n <= 0 || out_len <= 1) return;
+    /* F1 (2026-08-30 adversarial pass): truncation here used to be SILENT, and
+     * a clipped `direct=` token parses host-side as a VALID reading (`@-104`
+     * clipped to `@-1` reads as -1 dBm — the parser cannot tell). Every write
+     * below is bound by `lim`, never `out_len`; the difference is the reserve
+     * that guarantees room for the witness.
+     *
+     * PRESENCE of ` cut=1` proves truncation; its ABSENCE stays ambiguous,
+     * because firmware before +dudeclaw.20 never emits it. That asymmetry is
+     * deliberate — a sentinel-on-complete design ("ok=1") would make every
+     * old-firmware reply read as truncated, a worse lie than the one fixed. */
+    int lim = out_len - WATCH_CUT_RESERVE;
+    if (lim <= 1) return;          /* buffer too small to say anything at all */
+
     unsigned long now = millis();
     int used = (int)strlen(out);
-    if (used >= out_len - 1) return;
+    int n = 0;
+    int i = 0;
 
-    /* ⚠️ snprintf returns what it WOULD have written, not what it did. Advancing
-     * `used` by that value on a truncating call pushes it past the buffer, and
-     * (out_len - used) then goes NEGATIVE — as a size_t that is enormous, and the
-     * next call writes off the end. So every advance is bound-checked before the
-     * next write. On truncation we stop with a still-valid NUL-terminated string
-     * rather than corrupting memory on a device whose job is to not crash. */
-    int n = snprintf(out + used, (size_t)(out_len - used), " watch=");
-    if (n < 0) return;
+    /* ⚠️ snprintf returns what it WOULD have written, not what it did — so
+     * `used + n >= lim` is the exact clip test, and `used` only ever advances
+     * by a non-clipping n. That keeps used <= lim-1, which is what makes
+     * (lim - used) safe to hand to snprintf as a size_t. */
+
+    /* The caller's base string already filled the buffer: the whole watch
+     * section is missing, which is precisely the silent clipping this witness
+     * exists to expose. */
+    if (used >= lim) { appendWatchCut(out, used, out_len, lim); return; }
+
+    n = snprintf(out + used, (size_t)(lim - used), " watch=");
+    if (n < 0 || used + n >= lim) { appendWatchCut(out, used, out_len, lim); return; }
     used += n;
-    if (used >= out_len - 1) return;
 
-    for (int i = 0; i < s_watch_n; i++) {
+    for (i = 0; i < s_watch_n; i++) {
         if (s_watch_last_ms[i] == 0UL) {
             /* NEVER heard since radio start — reported as "never", never as 0,
              * which downstream would read as "heard just now". */
-            n = snprintf(out + used, (size_t)(out_len - used), "%s!%08x:never",
+            n = snprintf(out + used, (size_t)(lim - used), "%s!%08x:never",
                          i ? "," : "", (unsigned)s_watch_id[i]);
         } else {
-            n = snprintf(out + used, (size_t)(out_len - used),
+            n = snprintf(out + used, (size_t)(lim - used),
                          "%s!%08x:%lu/%lu@%.0f",
                          i ? "," : "", (unsigned)s_watch_id[i],
                          (now - s_watch_last_ms[i]) / 1000UL,
                          s_watch_pkts[i], (double)s_watch_rssi[i]);
         }
-        if (n < 0) return;
+        if (n < 0 || used + n >= lim) { appendWatchCut(out, used, out_len, lim); return; }
         used += n;
-        if (used >= out_len - 1) return;
     }
+
     /* DIRECT-only view, emitted as its OWN field rather than folded into the
      * watch token above. Two reasons: the host-side parser for `watch=` is
      * shipped and would break on a changed token shape (reader/writer pairs
@@ -627,30 +669,31 @@ static void appendWatch(char *out, int out_len) {
      * A node can be watch-heard at a strong RSSI and direct-never: that is a
      * NEARER node rebroadcasting it, and reading the first as a link budget
      * is how you site a digipeater in the wrong place. */
-    if (used < out_len - 1) {
-        n = snprintf(out + used, (size_t)(out_len - used), " direct=");
-        if (n < 0) return;
-        used += n;
-        if (used >= out_len - 1) return;
-        for (int i = 0; i < s_watch_n; i++) {
-            if (s_watch_direct_ms[i] == 0UL) {
-                n = snprintf(out + used, (size_t)(out_len - used), "%s!%08x:never",
-                             i ? "," : "", (unsigned)s_watch_id[i]);
-            } else {
-                n = snprintf(out + used, (size_t)(out_len - used),
-                             "%s!%08x:%lu@%.0f",
-                             i ? "," : "", (unsigned)s_watch_id[i],
-                             (now - s_watch_direct_ms[i]) / 1000UL,
-                             (double)s_watch_direct_rssi[i]);
-            }
-            if (n < 0) return;
-            used += n;
-            if (used >= out_len - 1) return;
+    n = snprintf(out + used, (size_t)(lim - used), " direct=");
+    if (n < 0 || used + n >= lim) { appendWatchCut(out, used, out_len, lim); return; }
+    used += n;
+
+    for (i = 0; i < s_watch_n; i++) {
+        if (s_watch_direct_ms[i] == 0UL) {
+            n = snprintf(out + used, (size_t)(lim - used), "%s!%08x:never",
+                         i ? "," : "", (unsigned)s_watch_id[i]);
+        } else {
+            n = snprintf(out + used, (size_t)(lim - used),
+                         "%s!%08x:%lu@%.0f",
+                         i ? "," : "", (unsigned)s_watch_id[i],
+                         (now - s_watch_direct_ms[i]) / 1000UL,
+                         (double)s_watch_direct_rssi[i]);
         }
+        if (n < 0 || used + n >= lim) { appendWatchCut(out, used, out_len, lim); return; }
+        used += n;
     }
-    if (s_watch_dropped > 0)
-        snprintf(out + used, (size_t)(out_len - used), " watch_dropped=%d",
-                 s_watch_dropped);
+
+    if (s_watch_dropped > 0) {
+        n = snprintf(out + used, (size_t)(lim - used), " watch_dropped=%d",
+                     s_watch_dropped);
+        if (n < 0 || used + n >= lim) { appendWatchCut(out, used, out_len, lim); return; }
+        used += n;
+    }
 }
 
 void loraEarsStats(char *out, int out_len) {

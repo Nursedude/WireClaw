@@ -221,7 +221,7 @@ Upstream adoption procedure (any state): `git fetch upstream && git merge
 fork-only audit and confirm the list is unchanged, app-only reflash, confirm
 `_ion.discover` reports the new marker.
 
-## Queued for the NEXT flash cycle — F1–F3 (2026-08-30 adversarial pass)
+## BUILT into `+dudeclaw.20`, NOT yet flashed — F1–F3 (2026-08-30 pass)
 
 > Source: the frontier pass on `4f1172d..2d21e0d` (MeshForge
 > `.claude/audits/review_provenance.md`, completed row 2026-08-30). All three
@@ -229,6 +229,26 @@ fork-only audit and confirm the list is unchanged, app-only reflash, confirm
 > — do NOT hot-patch one from a fleet box. F1 has an MF-side reader half that
 > lands in the SAME arc (reader/writer pairs wire together or fail together).
 > Each fix closes only with its drill; a built-but-undrilled fix stays open.
+>
+> **Status 2026-08-31** — all three WRITTEN and BUILT; all three envs SUCCESS,
+> version marker verified inside each `firmware.bin`. **Nothing is flashed**,
+> so no claw runs this yet.
+>
+> | | native drill | bench drill (hardware) |
+> |---|---|---|
+> | **F1** | ✅ PASSED — real `appendWatch` extracted from source, ASan+UBSan, every buffer size 1..894: 0 overruns, 0 silent truncations, 0 false marks | ⬜ 12-id watch list on a bench claw |
+> | **F2** | ✅ PASSED — exhaustive over all 256 flag bytes: exactly the 4 `(0,0)` encodings change, never claims direct with `hop_start == 0`, captured `0x62` cross-check holds | n/a — no old-firmware TX source exists (verify-by-code-read was always the plan) |
+> | **F3** | ⬜ none possible off-hardware | ⬜ littlefs image with `wifi_pass` dropped → expect refusal; **plus** the reboot tool's still-undrilled REFUSAL path |
+>
+> ⚠️ **F3 is BUILT BUT UNDRILLED — it stays OPEN.** A guard that has never
+> refused anything is not evidence it refuses correctly.
+>
+> ⚠️ **Corrected measurement**: the worst-case 12-id `lora_stats` string is
+> **830 chars**, not the 771 estimated in the provenance row — measured by the
+> native drill from the field TYPES (7-digit age at the 49.7-day millis wrap,
+> 10-digit `unsigned long` pkts, 4-char rssi) rather than from a typical
+> sample. Both figures exceed the old ~743-byte budget, so the defect and its
+> fix are unaffected; the new budget is 1384 usable, which clears 830.
 
 ### F1 — `lora_stats` truncation emits CONFIDENT WRONG dB (highest value)
 

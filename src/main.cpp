@@ -977,8 +977,23 @@ static void onNatsToolExec(nats_client_t *client, const nats_msg_t *msg,
     /* Determine success: unknown tool or "Error:" prefix */
     bool ok = found && strncmp(cmdResponseBuf, "Error:", 6) != 0;
 
-    /* Build JSON reply — escape directly into reply buffer (no intermediate) */
-    static char reply[768];
+    /* Build JSON reply — escape directly into reply buffer (no intermediate).
+     *
+     * F1 (2026-08-30 adversarial pass): this was 768, and 768 minus the
+     * wrapper is ~743 usable — under the 771-char worst case a 12-id
+     * `lora_stats` reply can reach (`claw_set_watch_ids` accepts 12; fleet
+     * lists are 2-3 today, so the defect was armed, not yet live). jsonEscape
+     * truncates mid-token, NUL-terminates and leaves no witness, and a clipped
+     * `direct=` token then parses host-side as a VALID reading (`@-104` ->
+     * `@-1` = -1 dBm). 1408 covers the escape-neutral worst case with margin:
+     * 21 (`{"ok":true,"result":"`) + 1023 (cmdResponseBuf) + 2 (`"}`) + NUL
+     * = 1047. Static BSS cost +640 B.
+     *
+     * Honest limit: content that is NOT escape-neutral (quotes/backslashes)
+     * can still exceed this — jsonEscape's bound keeps that SAFE but silent.
+     * `lora_stats` emits neither, which is why F1 closes for the path it was
+     * raised against; appendWatch's ` cut=1` witness is the general answer. */
+    static char reply[1408];
     int w;
     if (ok) {
         w = snprintf(reply, sizeof(reply), "{\"ok\":true,\"result\":\"");
