@@ -231,8 +231,16 @@ fork-only audit and confirm the list is unchanged, app-only reflash, confirm
 > Each fix closes only with its drill; a built-but-undrilled fix stays open.
 >
 > **Status 2026-08-31** — all three WRITTEN and BUILT; all three envs SUCCESS,
-> version marker verified inside each `firmware.bin`. **Nothing is flashed**,
-> so no claw runs this yet.
+> version marker verified inside each `firmware.bin`. **2 of 3 claws FLASHED**:
+> dudeclaw-01 (base env, 906.875 MHz confirmed) and dudeclaw-03 (`-st`,
+> 905.750 MHz confirmed), both `Hash of data verified`, both rejoined WiFi,
+> watch lists preserved. dudeclaw-02 (`-agent`) is deliberately HELD as the
+> `.19` CONTROL for F2's before/after measurement.
+>
+> ⭐ **Verify the env from the firmware, not from your `scp`**: right after a
+> flash the claw has heard 0 packets, so `lora_stats` takes its never-heard
+> branch and prints the compiled-in frequency (base 906.875 / `-st` 905.750).
+> Only available for the first few minutes.
 >
 > | | native drill | bench drill (hardware) |
 > |---|---|---|
