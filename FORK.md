@@ -221,6 +221,79 @@ Upstream adoption procedure (any state): `git fetch upstream && git merge
 fork-only audit and confirm the list is unchanged, app-only reflash, confirm
 `_ion.discover` reports the new marker.
 
+## Queued for the NEXT flash cycle — F1–F3 (2026-08-30 adversarial pass)
+
+> Source: the frontier pass on `4f1172d..2d21e0d` (MeshForge
+> `.claude/audits/review_provenance.md`, completed row 2026-08-30). All three
+> are firmware changes: they ride the next image (**`+dudeclaw.20`**) together
+> — do NOT hot-patch one from a fleet box. F1 has an MF-side reader half that
+> lands in the SAME arc (reader/writer pairs wire together or fail together).
+> Each fix closes only with its drill; a built-but-undrilled fix stays open.
+
+### F1 — `lora_stats` truncation emits CONFIDENT WRONG dB (highest value)
+
+Two stacked caps clip the reply tail silently, and a clipped `direct=` token
+parses host-side as a VALID reading (`@-104` → `@-1` = −1 dBm — the parser
+cannot tell): (a) `main.cpp` NATS reply `static char reply[768]` minus the
+JSON wrapper ≈ 743 bytes vs a 771-char worst-case 12-id stats string
+(arithmetic in the provenance row); `jsonEscape` truncates mid-token,
+NUL-terminates, leaves no witness. (b) `appendWatch`'s own `out_len` guard
+truncates the same way one layer down. Fleet watch lists are 2–3 ids today,
+so it is NOT live yet — it arms as the list grows (`claw_set_watch_ids`
+accepts 12).
+
+**Fix, both leaves:**
+1. Grow `reply` to **1408** (`lora_stats` content is escape-neutral — no
+   quotes/backslashes — so 1024-byte `cmdResponseBuf` + wrapper always fits).
+   Static BSS cost 640 B.
+2. **Positive truncation witness** in `appendWatch`: reserve ~8 bytes of
+   `out_len` up front; every early-return truncation path writes ` cut=1`
+   into the reserved space before returning. Complete output carries no
+   marker. PRESENCE is proof of truncation; absence stays ambiguous on old
+   firmware, which is the honest shape (a sentinel-on-complete design would
+   make every old-firmware reply read as truncated).
+
+**MF reader half (same arc):** `claw_telemetry.parse_lora_stats` gains
+`stats_truncated: True` on `cut=1` (None when absent), and `watched`/`direct`
+entries get `parse_error=True` when the flag is set — a clipped token must
+not survive as a clean reading.
+
+**Drill:** bench claw with a full 12-id watch list → confirm ` cut=1`
+appears and the host flags it; restore the fleet list after. Known accepted
+residual: the on-device agent path (`TOOL_RESULT_MAX_LEN` 512) still clips
+at ≥8 ids — display-only, noted here so it is not rediscovered.
+
+### F2 — `(0,0)` reads as DIRECT; hop_start-less originators forge it ⚠️ operator ratifies
+
+`hops = hop_start − hop_limit` (lora_ears.cpp). An originator that never
+sets hop_start (Meshtastic < 2.3) relayed down to hop_limit 0 arrives
+`flags=0x00` → hops=0 → the RELAY's RSSI is recorded as a DIRECT link — the
+exact wrong-siting failure hop-awareness exists to prevent.
+**Recommended:** claim direct only when `hops == 0 && hop_start > 0`; treat
+`(0,0)` as `-1` (unknown). **Trade being ratified:** a deliberate
+hop_limit-0 transmission (rare) loses its direct credit until any normal
+packet re-earns it. Today's fleet channel is all-modern so current data is
+clean; watching any third-party/public node makes the forgery real.
+**Drill:** no old-firmware TX source exists on the bench — verify by code
+read against the captured-flags method (the `0x62 → limit 2, start 3,
+hops 1` cross-check) and confirm host semantics for `-1` are already pinned
+(`test_malformed_header_hops_is_minus_one_never_direct`).
+
+### F3 — `tool_reboot` guards `wifi_ssid` but not `wifi_pass` PRESENCE
+
+A config whose `wifi_pass` KEY is absent (torn write, hand edit) passes the
+guard and reboots into a claw that cannot rejoin a WPA2 AP — the strand the
+tool exists to refuse. All three claws run WPA2 APs today (DudeNET/DudeNET2,
+traced 2026-08-30), so the gap is live. Empty VALUE stays legal (open AP is
+a real deployment); check **key presence only**: `strstr(buf,
+"\"wifi_pass\"")` beside the existing ssid check, refusing with its own
+message when absent.
+**Drill:** needs the bench/portal anyway — and the reboot tool's REFUSAL
+path is itself still undrilled (every live drill so far exercised the happy
+path). Do both in ONE bench session: littlefs image with the key dropped →
+expect the F3 refusal; blank the ssid via portal → expect the original
+refusal. That single session closes the oldest open caveat on this tool.
+
 ## Build / deploy
 
 **One env per claw — check which before you flash.** They are not
