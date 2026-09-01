@@ -47,6 +47,35 @@ echo "=== F1 — truncation witness ==="
 g++ $CXXFLAGS -o "$OUT/f1" "$OUT/f1.cpp"
 "$OUT/f1" || rc=1
 echo
+# F2's drill re-implements the hop classification rather than extracting it
+# (the logic is inline inside onReceive, not a standalone function). A hand
+# copy can drift from the thing it claims to test, so PIN the two together:
+# lift the deciding predicates from BOTH files and require them to match.
+# Without this the F2 drill would keep passing against its own stale copy —
+# the same "checker consuming something other than the artifact" trap the F1
+# extract exists to avoid.
+predicates() {
+    grep -oE 'hop_start (> 0 && hop_start >=|== 0 && hop_limit ==) [a-z_0-9]+' "$1" \
+        | sed 's/[[:space:]]\+/ /g' | sort -u
+}
+src_pred="$(predicates "$SRC")"
+drill_pred="$(predicates tools/drills/f2_hop_arithmetic.cpp)"
+if [ -z "$src_pred" ]; then
+    echo "FAIL: found no hop predicates in $SRC — the classification moved."
+    echo "      A silently-empty extract would pin nothing."
+    exit 1
+fi
+if [ "$src_pred" != "$drill_pred" ]; then
+    echo "FAIL: F2 drill has drifted from $SRC."
+    diff <(echo "$src_pred") <(echo "$drill_pred") || true
+    exit 1
+fi
+echo "F2 classification pinned to $SRC ($(echo "$src_pred" | wc -l) predicate(s))"
+# Counters must exist on the source side too — the drill asserts their SHAPE,
+# but only the firmware can prove they are actually incremented.
+for c in s_hop_start0 s_hop_malformed; do
+    grep -q "$c++" "$SRC" || { echo "FAIL: $SRC never increments $c"; exit 1; }
+done
 echo "=== F2 — hop arithmetic ==="
 # shellcheck disable=SC2086
 g++ $CXXFLAGS -o "$OUT/f2" tools/drills/f2_hop_arithmetic.cpp

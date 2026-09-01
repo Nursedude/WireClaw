@@ -37,8 +37,10 @@ int main(void){
     }
     printf("all 256 flag bytes: changed=%d direct_without_hop_start=%d\n",
            changed, direct_without_start);
-    /* 32 bytes have hop_limit==0 && hop_start==0 (the low 3 and high 3 bits
-     * zero; the middle 2 bits are unused padding) -> all of them flip. */
+    /* hop_limit==0 && hop_start==0 pins the low 3 and high 3 bits, leaving
+     * bits 3-4 (unused padding) free -> 2^2 = 4 encodings, all of which flip.
+     * (This comment said "32" until 2026-09-01; the assertion below was right
+     * the whole time and the prose beside it was wrong.) */
     CHECK(changed == 4, "exactly the 4 (0,0) encodings change");
     CHECK(direct_without_start == 0, "NEW never claims direct with hop_start 0");
 
@@ -48,6 +50,41 @@ int main(void){
     CHECK(hops_new(0x20) == 1, "(start 1, limit 0) still 1 hop");
     /* 5. Malformed stays malformed. */
     CHECK(hops_new(0x02) == -1, "(start 0, limit 2) stays -1");
+
+    /* 6. The +dudeclaw.21 rejection counters. The firmware splits the -1 case
+     *    into two buckets so "F2 never fired here" stops being unobservable.
+     *    This mirrors lora_ears.cpp exactly; if that classification changes
+     *    without this one, the drill fails rather than quietly diverging. */
+    enum Bucket { VALID, HOP_START0, MALFORMED };
+    auto classify = [](uint8_t flags) -> Bucket {
+        int hop_limit = flags & 0x07, hop_start = (flags >> 5) & 0x07;
+        if (hop_start > 0 && hop_start >= hop_limit) return VALID;
+        if (hop_start == 0 && hop_limit == 0)        return HOP_START0;
+        return MALFORMED;
+    };
+    int n_valid = 0, n_start0 = 0, n_malformed = 0, misfiled = 0;
+    for (int f = 0; f < 256; f++) {
+        uint8_t b = (uint8_t)f;
+        Bucket k = classify(b);
+        if (k == VALID)          n_valid++;
+        else if (k == HOP_START0) n_start0++;
+        else                      n_malformed++;
+        /* Every byte lands in exactly one bucket, and the bucket must agree
+         * with the arithmetic: VALID iff hops_new >= 0. */
+        if ((k == VALID) != (hops_new(b) >= 0)) misfiled++;
+        /* The F2 bucket is EXACTLY the set F2 changed — no more, no less. */
+        if (k == HOP_START0 && !(hops_old(b) == 0 && hops_new(b) == -1)) misfiled++;
+        /* A malformed header was never a forged DIRECT link: the old
+         * arithmetic did not call it direct either, so counting it as an F2
+         * catch would overstate what F2 does. */
+        if (k == MALFORMED && hops_old(b) == 0) misfiled++;
+    }
+    printf("buckets: valid=%d hop_start0=%d malformed=%d (sum %d) misfiled=%d\n",
+           n_valid, n_start0, n_malformed,
+           n_valid + n_start0 + n_malformed, misfiled);
+    CHECK(n_valid + n_start0 + n_malformed == 256, "every flag byte is classified exactly once");
+    CHECK(n_start0 == changed, "the hop_start0 bucket is exactly the set F2 changed");
+    CHECK(misfiled == 0, "no byte is filed against the wrong bucket");
 
     printf("\n%s (%d failure(s))\n", failures?"F2 DRILL FAILED":"F2 DRILL PASSED", failures);
     return failures ? 1 : 0;

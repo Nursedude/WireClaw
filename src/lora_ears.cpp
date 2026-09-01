@@ -69,6 +69,20 @@ static unsigned long s_started_ms = 0;
 static unsigned long s_heard = 0;
 static unsigned long s_crc_err = 0;
 static unsigned long s_runts = 0;
+/* Why F2's rejections are counted, and why in TWO buckets (+dudeclaw.21):
+ * F2 made `(hop_start 0, hop_limit 0)` score UNKNOWN instead of direct, but
+ * nothing observes whether that encoding ever ARRIVES here. Without a count,
+ * "F2 changed no direct links" is indistinguishable from "F2 never fired" —
+ * a correct fix and an inert one read identically, which is exactly the
+ * unobservable-is-not-healthy trap. The 2026-09-01 before/after measured
+ * F2-LOST 0 on every claw and could not tell those two apart.
+ * They are SEPARATE counters on purpose: `hop_start0` is the F2 case (the old
+ * arithmetic would have called it direct), while `hop_malformed` is a header
+ * whose start < limit — a foreign or corrupt stack, never a forged direct
+ * link. Summing them would map two unrelated degraded states onto one number
+ * and re-commit the defect class F2 exists to remove. */
+static unsigned long s_hop_start0 = 0;
+static unsigned long s_hop_malformed = 0;
 static unsigned long s_last_heard_ms = 0;
 static uint32_t s_last_from = 0, s_last_to = 0;
 static int      s_last_hops = -1;   /* -1 == unknown/malformed, never "direct" */
@@ -566,8 +580,16 @@ void loraEarsTick() {
              * (0,0) is UNKNOWN. Only (0,0) changes: (3,2)->1 and (3,3)->0 are
              * untouched. Accepted trade: a deliberate hop_limit-0 transmission
              * loses direct credit until any normal packet re-earns it. */
-            int hops = (hop_start > 0 && hop_start >= hop_limit)
-                           ? (hop_start - hop_limit) : -1;
+            int hops;
+            if (hop_start > 0 && hop_start >= hop_limit) {
+                hops = hop_start - hop_limit;
+            } else if (hop_start == 0 && hop_limit == 0) {
+                hops = -1;
+                s_hop_start0++;      /* the F2 case: old arithmetic said 0 */
+            } else {
+                hops = -1;
+                s_hop_malformed++;   /* start < limit: foreign/corrupt header */
+            }
             s_last_hops = hops;
             /* Watch list: attribute this packet to a tracked id, if any. */
             for (int i = 0; i < s_watch_n; i++) {
@@ -715,8 +737,10 @@ void loraEarsStats(char *out, int out_len) {
     }
     snprintf(out, out_len,
              "mesh_heard_age_s: %lu (heard %lu pkts, crc_err %lu, runts %lu, "
+             "hop_start0 %lu, hop_malformed %lu, "
              "last from=!%08x to=!%08x ch=0x%02x rssi=%.0f snr=%.1f hops=%d)",
              (now - s_last_heard_ms) / 1000UL, s_heard, s_crc_err, s_runts,
+             s_hop_start0, s_hop_malformed,
              (unsigned)s_last_from, (unsigned)s_last_to, (unsigned)s_last_ch,
              (double)s_last_rssi, (double)s_last_snr, s_last_hops);
     appendWatch(out, out_len);
