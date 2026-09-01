@@ -15,6 +15,7 @@
 #include "anomaly.h"
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_mac.h>
 #include "soc/soc_caps.h"
 #include <LittleFS.h>
 #include <nats_esp32.h>
@@ -102,7 +103,7 @@ static const char *TOOLS_JSON = R"JSON([
 {"type":"function","function":{"name":"led_set","description":"Set RGB LED 0-255","parameters":{"type":"object","properties":{"r":{"type":"integer"},"g":{"type":"integer"},"b":{"type":"integer"}},"required":["r","g","b"]}}},
 {"type":"function","function":{"name":"gpio_write","description":"Set GPIO pin HIGH/LOW","parameters":{"type":"object","properties":{"pin":{"type":"integer"},"value":{"type":"integer"}},"required":["pin","value"]}}},
 {"type":"function","function":{"name":"gpio_read","description":"Read GPIO pin state","parameters":{"type":"object","properties":{"pin":{"type":"integer"}},"required":["pin"]}}},
-{"type":"function","function":{"name":"device_info","description":"Get heap, uptime, WiFi, chip info","parameters":{"type":"object","properties":{}}}},
+{"type":"function","function":{"name":"device_info","description":"Get board identity (MAC, firmware version), heap, uptime, WiFi, chip info","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"file_read","description":"Read file from filesystem","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}},
 {"type":"function","function":{"name":"file_write","description":"Write file to filesystem","parameters":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}}},
 {"type":"function","function":{"name":"config_set","description":"Set ONE non-secret config key (device_name, timezone, lora_watch_ids, lora_tx_channel, telegram_chat_id, telegram_cooldown, model, api_base_url). Secrets and connectivity keys are portal-only by design. Verifies by re-read; never echoes the document.","parameters":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"}},"required":["key","value"]}}},
@@ -214,8 +215,33 @@ static void tool_device_info(const char *args, char *result, int result_len) {
      * so a caller could overhear it at boot but never ASK for it. Leading also
      * costs nothing to existing readers: the fleet-side parser anchors every
      * field on "(?:^|,)\s*", so each one still matches after a comma. */
+    /* MAC is SECOND, right behind Version, for the same truncation reason:
+     * these two are the identity fields, and snprintf drops the tail.
+     *
+     * Why it exists (+dudeclaw.21): the board-identity check was ONE-SIDED.
+     * The host names a board `/dev/serial/by-id/..._<MAC>-if00`, but the bus
+     * side published heap/uptime/wifi/chip/version and NO identity — so
+     * "which claw is on this port" could only be answered by resetting a
+     * board and watching whose uptime dropped. Publishing the MAC lets the
+     * two halves be COMPARED instead of inferred, which is what makes a
+     * flash-time identity check possible at all.
+     *
+     * ESP_MAC_WIFI_STA is the base/efuse MAC — the same source lora_ears
+     * derives the Meshtastic node id from, so identity cannot disagree
+     * between the two consumers, and the value esptool's read_mac prints.
+     *
+     * ⚠️ Uppercase colon-separated to match the host by-id string BYTE FOR
+     * BYTE, so a comparison is a string equality and not a normalization
+     * exercise. The correspondence to the by-id name is UNVERIFIED on this
+     * hardware — it follows from ESP-IDF assigning the USB serial from the
+     * base MAC, but nothing here has observed it. The FIRST board flashed to
+     * .21 must diff this field against its own by-id name before anyone
+     * trusts it as an identity check. */
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(result, result_len,
         "Version: %s, "
+        "MAC: %02X:%02X:%02X:%02X:%02X:%02X, "
         "Free heap: %u bytes, Total heap: %u bytes, "
         "Min free heap: %u bytes, Max alloc block: %u bytes, "
         "Reset reason: %s, "
@@ -223,6 +249,7 @@ static void tool_device_info(const char *args, char *result, int result_len) {
         "WiFi: %s (rssi %d dBm), IP: %s, "
         "Chip: %s rev %d, %d cores, %lu MHz",
         WIRECLAW_VERSION,
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
         ESP.getFreeHeap(), ESP.getHeapSize(),
         ESP.getMinFreeHeap(), ESP.getMaxAllocHeap(),
         resetReasonName(),

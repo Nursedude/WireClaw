@@ -1,6 +1,6 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define WIRECLAW_VERSION "0.4.0+dudeclaw.20"
+#define WIRECLAW_VERSION "0.4.0+dudeclaw.21"
 
 #endif
